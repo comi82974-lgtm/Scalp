@@ -101,7 +101,7 @@ ul{padding-left:18px;margin:6px 0}
 <script>
 const $=id=>document.getElementById(id);
 const st={get(k,d){try{const v=localStorage.getItem(k);return v===null?d:v}catch(e){return d}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
-$('key').value=st.get('key','');$('model').value=st.get('model','gemini-2.5-flash');$('asset').value='';$('tdkey').value=st.get('tdkey','');$('sym').value=st.get('sym','XAU/USD');
+$('key').value=st.get('key','');$('model').value=st.get('model','gemini-3.8-flash');$('asset').value='';$('tdkey').value=st.get('tdkey','');$('sym').value=st.get('sym','XAU/USD');
 const imgs={H1:null,M15:null,M5:null};
 
 const PROMPT=`Tu es un trader professionnel ICT/SMC et price action, spécialisé dans le scalping en M5.
@@ -227,6 +227,7 @@ $('go').onclick=async()=>{
   const tdk=$('tdkey').value.trim(),sym=$('sym').value.trim();
   st.set('key',key);st.set('model',$('model').value.trim());st.set('tdkey',tdk);st.set('sym',sym);
   $('go').disabled=true;$('go').textContent='Analyse en cours...';
+  let wl=null;try{wl=await navigator.wakeLock.request('screen')}catch(e){}
   real=null;let extra='',warn='';
   try{
     if(tdk&&sym){
@@ -240,16 +241,35 @@ $('go').onclick=async()=>{
     const assetIn=$('asset').value.trim(),asset=assetIn||"non fourni : lis le nom de l'actif sur la capture (en haut à gauche du graphique)",price=$('price').value.trim()||"non fourni : lis-le sur la capture M5 (étiquette de prix de la dernière bougie, sur l'échelle de droite)";
     const parts=[{text:PROMPT.replace('{ASSET}',asset).replace('{PRICE}',price)+extra}];
     for(const tf of ['H1','M15','M5']) if(imgs[tf]) parts.push({text:'Capture '+tf+' :'},{inline_data:{mime_type:'image/jpeg',data:imgs[tf].toDataURL('image/jpeg',.88).split(',')[1]}});
-    const url='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent($('model').value.trim())+':generateContent?key='+encodeURIComponent(key);
-    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts}],generationConfig:{responseMimeType:'application/json',temperature:.3}})});
-    const j=await r.json();
-    if(!r.ok) throw new Error(j.error&&j.error.message||('Erreur '+r.status));
+    const body=JSON.stringify({contents:[{parts}],generationConfig:{responseMimeType:'application/json',temperature:.3}});
+    const first=$('model').value.trim();
+    const models=[first].concat(['gemini-3.8-flash','gemini-3.7-flash','gemini-3.5-flash'].filter(m=>m!==first));
+    let j=null,last='';
+    for(let mi=0;mi<models.length&&!j;mi++){
+      for(let t=0;t<2&&!j;t++){
+        if(mi||t)$('go').textContent='Gemini surchargé, nouvel essai...';
+        try{
+          const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(models[mi])+':generateContent?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body});
+          const x=await r.json();
+          if(r.ok){j=x;break}
+          last=(x.error&&x.error.message)||('Erreur '+r.status);
+          if(r.status===404)break;
+          if(![429,500,503,504].includes(r.status))throw new Error(last);
+        }catch(e){
+          if(e instanceof TypeError)last='Connexion interrompue : reste sur l\'app pendant l\'analyse';
+          else throw e;
+        }
+        await new Promise(z=>setTimeout(z,2500));
+      }
+    }
+    if(!j)throw new Error(last);
     const txt=j.candidates[0].content.parts.map(p=>p.text||'').join('').replace(/```json|```/g,'').trim();
     const d=JSON.parse(txt);
     if(real&&d.actif_lu){const n=x=>String(x).toUpperCase().replace(/[^A-Z0-9]/g,'');const a=n(d.actif_lu),b=n(sym).slice(0,6);if(b&&!a.includes(b)){real=null;warn='Les données Twelve Data ('+sym+') ne correspondent pas à l\'actif des captures ('+d.actif_lu+') : indicateurs estimés par Gemini.'}}
     show(d);save(d,assetIn||d.actif_lu||'?');
     if(warn)$('err').textContent=warn;
   }catch(e){$('err').textContent='Échec : '+e.message}
+  try{if(wl)wl.release()}catch(e){}
   $('go').disabled=false;$('go').textContent='Analyser';
 };
 
