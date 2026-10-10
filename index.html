@@ -57,12 +57,12 @@ ul{padding-left:18px;margin:6px 0}
   <input id="key" type="password" autocomplete="off" placeholder="AIza...">
   <div class="row">
     <div><label for="model">Modèle</label><input id="model"></div>
-    <div><label for="asset">Actif</label><input id="asset"></div>
-    <div><label for="price">Prix actuel</label><input id="price" inputmode="decimal" placeholder="2650.40"></div>
+    <div><label for="asset">Actif (auto)</label><input id="asset" placeholder="auto"></div>
+    <div><label for="price">Prix (auto)</label><input id="price" inputmode="decimal" placeholder="auto"></div>
   </div>
   <label for="tdkey">Clé Twelve Data (optionnelle, pour des indicateurs exacts)</label>
   <input id="tdkey" type="password" autocomplete="off" placeholder="clé de twelvedata.com">
-  <label for="sym">Symbole pour les données</label>
+  <label for="sym">Symbole des données (seulement avec la clé Twelve Data)</label>
   <input id="sym" placeholder="XAU/USD">
 </div>
 
@@ -80,6 +80,7 @@ ul{padding-left:18px;margin:6px 0}
   <div class="grid">
     <div>Entrée<b id="e"></b></div><div>SL<b id="s"></b></div><div>TP<b id="t"></b></div><div>RR<b id="rr"></b></div>
   </div>
+  <p class="note" id="pl"></p>
   <canvas id="cv"></canvas>
   <button class="sec" id="dl">Enregistrer l'image annotée</button>
   <p id="why"></p>
@@ -100,7 +101,7 @@ ul{padding-left:18px;margin:6px 0}
 <script>
 const $=id=>document.getElementById(id);
 const st={get(k,d){try{const v=localStorage.getItem(k);return v===null?d:v}catch(e){return d}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
-$('key').value=st.get('key','');$('model').value=st.get('model','gemini-2.5-flash');$('asset').value=st.get('asset','XAUUSD');$('tdkey').value=st.get('tdkey','');$('sym').value=st.get('sym','XAU/USD');
+$('key').value=st.get('key','');$('model').value=st.get('model','gemini-2.5-flash');$('asset').value='';$('tdkey').value=st.get('tdkey','');$('sym').value=st.get('sym','XAU/USD');
 const imgs={H1:null,M15:null,M5:null};
 
 const PROMPT=`Tu es un trader professionnel ICT/SMC et price action, spécialisé dans le scalping en M5.
@@ -120,6 +121,8 @@ MÉTHODE :
 RÈGLES :
 - Ne devine pas les niveaux. Si tu ne lis pas un prix avec certitude, utilise le prix actuel comme repère pour caler l'échelle.
 - Confiance : 0-100. 55 = setup correct, 75 = bon, 90 = excellent.
+- prix_lu : le prix actuel que tu lis sur la capture M5 (étiquette de prix de la dernière bougie, sur l'échelle de droite). 0 si illisible.
+- actif_lu : l'actif et le timeframe que tu lis sur la capture M5 (ex. XAUUSD M5). Si les captures ne montrent pas le même actif, réponds NO_TRADE et signale-le dans raisons.
 
 OVERLAY : coordonnées sur la capture M5, entiers de 0 à 1000 (0 = haut/gauche, 1000 = bas/droite).
 - entry_y, sl_y, tp_y : position verticale des lignes.
@@ -128,7 +131,7 @@ OVERLAY : coordonnées sur la capture M5, entiers de 0 à 1000 (0 = haut/gauche,
 INDICATEURS : même sur un graphique nu, estime visuellement l'état de ces indicateurs à partir des bougies : RSI (14), MACD, Volume, Tendance, EMA 50/200, Bollinger, Stochastique, ADX, Ichimoku, ATR. Donne une valeur approximative (avec ~ devant) et un état cohérent avec la valeur (ex. Stochastique "Survendu" seulement sous 20, "Suracheté" au-dessus de 80). Si tu ne peux pas estimer un indicateur, mets valeur "?" et sens "neutral". sens = "bull", "bear" ou "neutral". pattern = la figure ou le pattern principal détecté.
 
 RÉPONDS UNIQUEMENT EN JSON valide :
-{"verdict":"BUY|SELL|NO_TRADE","entree":0,"sl":0,"tp":0,"rr":0,"confiance":0,
+{"verdict":"BUY|SELL|NO_TRADE","entree":0,"sl":0,"tp":0,"rr":0,"confiance":0,"prix_lu":0,"actif_lu":"",
 "confluences":["..."],"invalidation":"...","raisons":"explication courte",
 "indicateurs":[{"nom":"RSI (14)","valeur":"~54","etat":"Haussier","sens":"bull"}],"pattern":"...",
 "overlay":{"entry_y":0,"sl_y":0,"tp_y":0,"zones":[{"type":"OB","label":"OB","ymin":0,"xmin":0,"ymax":0,"xmax":0}]}}`;
@@ -210,17 +213,19 @@ function sumLine(tf,r){
 }
 function buildData(m5,r){
   const rows40=m5.slice(-40).map(x=>x.t.slice(5,16)+' '+fmt(x.o)+' '+fmt(x.h)+' '+fmt(x.l)+' '+fmt(x.c)).join('\n');
-  return '\n\nDONNÉES DE MARCHÉ RÉELLES (calculées, exactes : elles priment sur ta lecture visuelle) :\n'+sumLine('H1',r.h1)+'\n'+sumLine('M15',r.m15)+'\n'+sumLine('M5',r.m5)+'\nDernières bougies M5 (date heure, ouverture haut bas clôture) :\n'+rows40+'\n\nConsigne : entrée, SL et TP doivent être cohérents avec ces prix réels et avec l\'ATR M5 (SL typique de 1 à 2 ATR). Mets "indicateurs":[] dans le JSON car l\'app les calcule elle-même.';
+  return '\n\nDONNÉES DE MARCHÉ RÉELLES pour le symbole '+$('sym').value.trim()+' (calculées, exactes : elles priment sur ta lecture visuelle ; si l\'actif des captures est différent, ignore-les) :\n'+sumLine('H1',r.h1)+'\n'+sumLine('M15',r.m15)+'\n'+sumLine('M5',r.m5)+'\nDernières bougies M5 (date heure, ouverture haut bas clôture) :\n'+rows40+'\n\nConsigne : entrée, SL et TP doivent être cohérents avec ces prix réels et avec l\'ATR M5 (SL typique de 1 à 2 ATR). Mets "indicateurs":[] dans le JSON car l\'app les calcule elle-même.';
 }
 
 /* Analyse */
+$('price').addEventListener('input',()=>{$('price').dataset.auto=''});
 $('go').onclick=async()=>{
   $('err').textContent='';
+  if($('price').dataset.auto==='1'){$('price').value='';$('price').dataset.auto=''}
   const key=$('key').value.trim();
   if(!key){$('err').textContent='Entre ta clé API Gemini.';return}
   if(!imgs.M5){$('err').textContent='Ajoute au moins la capture M5.';return}
   const tdk=$('tdkey').value.trim(),sym=$('sym').value.trim();
-  st.set('key',key);st.set('model',$('model').value.trim());st.set('asset',$('asset').value.trim());st.set('tdkey',tdk);st.set('sym',sym);
+  st.set('key',key);st.set('model',$('model').value.trim());st.set('tdkey',tdk);st.set('sym',sym);
   $('go').disabled=true;$('go').textContent='Analyse en cours...';
   real=null;let extra='',warn='';
   try{
@@ -228,11 +233,11 @@ $('go').onclick=async()=>{
       try{
         const [m5,m15,h1]=await Promise.all([fetchSeries(sym,'5min',tdk),fetchSeries(sym,'15min',tdk),fetchSeries(sym,'1h',tdk)]);
         real={m5:calc(m5),m15:calc(m15),h1:calc(h1)};
-        $('price').value=fmt(m5[m5.length-1].c);
+        $('price').value=fmt(m5[m5.length-1].c);$('price').dataset.auto='1';
         extra=buildData(m5,real);
       }catch(e){warn='Données de marché indisponibles ('+e.message+'). Indicateurs estimés par Gemini.'}
     }
-    const asset=$('asset').value.trim()||'?',price=$('price').value.trim()||'inconnu';
+    const assetIn=$('asset').value.trim(),asset=assetIn||"non fourni : lis le nom de l'actif sur la capture (en haut à gauche du graphique)",price=$('price').value.trim()||"non fourni : lis-le sur la capture M5 (étiquette de prix de la dernière bougie, sur l'échelle de droite)";
     const parts=[{text:PROMPT.replace('{ASSET}',asset).replace('{PRICE}',price)+extra}];
     for(const tf of ['H1','M15','M5']) if(imgs[tf]) parts.push({text:'Capture '+tf+' :'},{inline_data:{mime_type:'image/jpeg',data:imgs[tf].toDataURL('image/jpeg',.88).split(',')[1]}});
     const url='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent($('model').value.trim())+':generateContent?key='+encodeURIComponent(key);
@@ -241,7 +246,8 @@ $('go').onclick=async()=>{
     if(!r.ok) throw new Error(j.error&&j.error.message||('Erreur '+r.status));
     const txt=j.candidates[0].content.parts.map(p=>p.text||'').join('').replace(/```json|```/g,'').trim();
     const d=JSON.parse(txt);
-    show(d);save(d,asset);
+    if(real&&d.actif_lu){const n=x=>String(x).toUpperCase().replace(/[^A-Z0-9]/g,'');const a=n(d.actif_lu),b=n(sym).slice(0,6);if(b&&!a.includes(b)){real=null;warn='Les données Twelve Data ('+sym+') ne correspondent pas à l\'actif des captures ('+d.actif_lu+') : indicateurs estimés par Gemini.'}}
+    show(d);save(d,assetIn||d.actif_lu||'?');
     if(warn)$('err').textContent=warn;
   }catch(e){$('err').textContent='Échec : '+e.message}
   $('go').disabled=false;$('go').textContent='Analyser';
@@ -257,6 +263,7 @@ function show(d){
   const f=x=>x?x:'-';
   $('e').textContent=f(d.entree);$('s').textContent=f(d.sl);$('t').textContent=f(d.tp);$('rr').textContent=f(d.rr);
   $('why').textContent=d.raisons||'';
+  $('pl').textContent=(d.actif_lu||d.prix_lu)?('Lu sur la capture M5 : '+(d.actif_lu||'')+(d.prix_lu?' à '+d.prix_lu:'')):'';
   $('conf').innerHTML='';(d.confluences||[]).forEach(x=>{const li=document.createElement('li');li.textContent=x;$('conf').appendChild(li)});
   $('inv').textContent=d.invalidation?'Invalidation : '+d.invalidation:'';
   const ind=real?rows(real.m5):(Array.isArray(d.indicateurs)?d.indicateurs:[]);
