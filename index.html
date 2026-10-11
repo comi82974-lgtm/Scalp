@@ -30,7 +30,7 @@ button.sec{background:transparent;color:var(--tx);border:1px solid var(--line);f
 button:disabled{opacity:.5}
 #err{color:var(--sell);font-size:14px;margin-top:8px;white-space:pre-wrap}
 .verdict{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-.badge{font-size:20px;font-weight:800;padding:4px 14px;border-radius:8px}
+.badge{font-size:15px;font-weight:800;padding:4px 14px;border-radius:8px}
 .BUY{background:#2fbf7122;color:var(--buy)}.SELL{background:#e5534b22;color:var(--sell)}.NO_TRADE{background:#8996a622;color:var(--mut)}
 .bar{height:8px;background:var(--bg);border-radius:6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--brass)}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0;text-align:center}
@@ -45,6 +45,11 @@ ul{padding-left:18px;margin:6px 0}
 .pill::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:6px}
 .pill.bull{color:var(--buy);border-color:#2fbf7155}.pill.bear{color:var(--sell);border-color:#e5534b55}.pill.neu{color:var(--brass);border-color:#c9a24b55}
 #pat{margin-top:8px;font-size:14px;color:var(--tx)}
+.WAIT{background:#c9a24b22;color:var(--brass)}
+.valbox{background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--brass);border-radius:8px;padding:9px 11px;margin:10px 0;font-size:14px}
+.ckr{display:flex;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:13px;align-items:baseline}
+.ckr b{min-width:16px}.ck-oui{color:var(--buy)}.ck-par{color:var(--brass)}.ck-non{color:var(--sell)}
+.ckr .pts{margin-left:auto;color:var(--mut);white-space:nowrap}
 .hide{display:none}
 </style>
 </head>
@@ -77,15 +82,33 @@ ul{padding-left:18px;margin:6px 0}
 <div class="pan hide" id="res">
   <div class="verdict"><span class="badge" id="vd"></span><span id="cf"></span></div>
   <div class="bar"><i id="cfbar"></i></div>
+  <div class="valbox hide" id="val"></div>
   <div class="grid">
     <div>Entrée<b id="e"></b></div><div>SL<b id="s"></b></div><div>TP<b id="t"></b></div><div>RR<b id="rr"></b></div>
   </div>
+  <h2 id="ckt" class="hide" style="margin:14px 0 4px;font-size:14px">Pourquoi ce score</h2>
+  <div id="ck"></div>
   <p class="note" id="pl"></p>
   <canvas id="cv"></canvas>
   <button class="sec" id="dl">Enregistrer l'image annotée</button>
   <p id="why"></p>
   <ul id="conf"></ul>
   <p class="note" id="inv"></p>
+  <p id="att"></p>
+  <div id="pb" class="hide">
+    <h2 style="margin:16px 0 8px">Setup conditionnel</h2>
+    <p id="pbc" style="margin:0 0 6px"></p>
+    <div class="grid"><div>Entrée<b id="pbe"></b></div><div>SL<b id="pbs"></b></div><div>TP<b id="pbt"></b></div><div>RR<b id="pbr"></b></div></div>
+    <canvas id="cv2"></canvas>
+  </div>
+  <div id="sc" class="hide">
+    <h2 style="margin:16px 0 8px">Scénario le plus probable</h2>
+    <p id="sct" style="margin:0 0 4px;font-weight:700"></p>
+    <p id="scd" style="margin:0 0 6px"></p>
+    <ol id="sce" style="padding-left:20px;margin:6px 0"></ol>
+    <canvas id="cv3"></canvas>
+    <p class="note" id="sca"></p>
+  </div>
   <p class="note">Les lignes sont placées par Gemini à l'œil : vérifie-les avec l'échelle de prix avant de passer l'ordre.</p>
 </div>
 
@@ -120,7 +143,15 @@ MÉTHODE :
 
 RÈGLES :
 - Ne devine pas les niveaux. Si tu ne lis pas un prix avec certitude, utilise le prix actuel comme repère pour caler l'échelle.
-- Confiance : 0-100. 55 = setup correct, 75 = bon, 90 = excellent.
+- Ne cours pas après le prix. Si le mouvement est déjà très étendu (prix loin de la dernière zone valide OB/FVG de H1 ou M15, impulsion déjà bien avancée, ou entrée seulement possible sur un micro-FVG au sommet), ne propose PAS d'entrée : réponds NO_TRADE et indique dans "attente" la zone de prix et la condition à attendre (ex. retour dans l'OB M15 vers X puis rejet).
+- plan_conditionnel : à remplir quand le trade ne peut plus être pris maintenant (entrée manquée, prix déjà parti) ou quand tu réponds NO_TRADE alors qu'un setup propre existerait si le prix revenait dans une zone (OB, FVG, retest d'une cassure, liquidité à venir). Donne sens, zone_min, zone_max, entree, sl, tp, rr (au moins 1.5), condition (la confirmation à attendre dans la zone, ex. rejet M5) et les coordonnées overlay sur la capture M5 (entry_y, sl_y, tp_y et zone {ymin,xmin,ymax,xmax}, entiers 0-1000). Si un trade est prenable maintenant, ou si aucun plan propre n'existe, mets null.
+- scenario : décris TOUJOURS (même si NO_TRADE) le scénario le plus probable pour les prochaines bougies M5/M15 : biais ("haussier", "baissier" ou "range"), description courte (2 à 3 phrases), 2 à 4 etapes concrètes avec niveaux de prix (ex. retour dans le FVG vers X, rejet, puis extension vers la liquidité à Y), chemin = les points du trajet projeté sur la capture M5 (x et y entiers 0-1000, le premier point = la dernière bougie, label court), alternatif = ce qui invaliderait ce scénario et ce qui se passerait alors. Reste cohérent avec le verdict et le plan conditionnel. C'est ta lecture du graphique, pas une certitude.
+- Une liquidité déjà touchée par une mèche est consommée : ne l'utilise ni comme TP ni comme confluence.
+- type_ordre : "LIMIT" (ordre en attente dans la zone) ou "MARCHE" (le prix est déjà dans la zone). Vide si NO_TRADE.
+- action : "ENTRER" si le trade est prenable maintenant (confirmation M5 déjà visible dans la zone, OU ordre limite sur une zone valide pas encore touchée) ; "ATTENDRE" s'il manque une validation ou si le trade n'existe qu'au retour du prix dans une zone (plan conditionnel) ; "PAS_DE_TRADE" sinon.
+- validation : si ATTENDRE, la validation précise à attendre, avec un niveau de prix (ex. "clôture M5 au-dessus de 51700", "rejet de la zone 51600-51640 avec mèche et clôture verte"). Si ENTRER, le déclencheur (ex. "ordre limite à 51680"). niveau = le prix clé (0 si aucun).
+- criteres : évalue le trade présenté (le principal, ou le plan conditionnel si NO_TRADE) avec exactement ces 6 clés. Pour chacune : v = "oui", "partiel" ou "non", et c = commentaire de 12 mots maximum. biais (H1 et M15 alignés avec le trade), zone (entrée sur OB/FVG valide non mitigé), liquidite (liquidité prise avant l'entrée ou cible de liquidité claire et non consommée), confluences (au moins 2), confirmation (le M5 a déjà confirmé : rejet, clôture, cassure), fraicheur (le mouvement n'est pas déjà étendu). Sois sévère : "oui" seulement si c'est visible sur la capture.
+- Ne donne PAS de chiffre de confiance ni de score : l'app le calcule à partir de criteres.
 - prix_lu : le prix actuel que tu lis sur la capture M5 (étiquette de prix de la dernière bougie, sur l'échelle de droite). 0 si illisible.
 - actif_lu : l'actif et le timeframe que tu lis sur la capture M5 (ex. XAUUSD M5). Si les captures ne montrent pas le même actif, réponds NO_TRADE et signale-le dans raisons.
 
@@ -131,7 +162,7 @@ OVERLAY : coordonnées sur la capture M5, entiers de 0 à 1000 (0 = haut/gauche,
 INDICATEURS : même sur un graphique nu, estime visuellement l'état de ces indicateurs à partir des bougies : RSI (14), MACD, Volume, Tendance, EMA 50/200, Bollinger, Stochastique, ADX, Ichimoku, ATR. Donne une valeur approximative (avec ~ devant) et un état cohérent avec la valeur (ex. Stochastique "Survendu" seulement sous 20, "Suracheté" au-dessus de 80). Si tu ne peux pas estimer un indicateur, mets valeur "?" et sens "neutral". sens = "bull", "bear" ou "neutral". pattern = la figure ou le pattern principal détecté.
 
 RÉPONDS UNIQUEMENT EN JSON valide :
-{"verdict":"BUY|SELL|NO_TRADE","entree":0,"sl":0,"tp":0,"rr":0,"confiance":0,"prix_lu":0,"actif_lu":"",
+{"verdict":"BUY|SELL|NO_TRADE","entree":0,"sl":0,"tp":0,"rr":0,"prix_lu":0,"actif_lu":"","type_ordre":"LIMIT","action":"ENTRER","validation":{"texte":"","niveau":0},"criteres":{"biais":{"v":"oui","c":""},"zone":{"v":"oui","c":""},"liquidite":{"v":"oui","c":""},"confluences":{"v":"oui","c":""},"confirmation":{"v":"oui","c":""},"fraicheur":{"v":"oui","c":""}},"attente":"","plan_conditionnel":{"sens":"BUY","zone_min":0,"zone_max":0,"entree":0,"sl":0,"tp":0,"rr":0,"condition":"","overlay":{"entry_y":0,"sl_y":0,"tp_y":0,"zone":{"ymin":0,"xmin":0,"ymax":0,"xmax":0}}},"scenario":{"titre":"","biais":"haussier","description":"","etapes":[""],"chemin":[{"x":0,"y":0,"label":""}],"alternatif":""},
 "confluences":["..."],"invalidation":"...","raisons":"explication courte",
 "indicateurs":[{"nom":"RSI (14)","valeur":"~54","etat":"Haussier","sens":"bull"}],"pattern":"...",
 "overlay":{"entry_y":0,"sl_y":0,"tp_y":0,"zones":[{"type":"OB","label":"OB","ymin":0,"xmin":0,"ymax":0,"xmax":0}]}}`;
@@ -281,14 +312,46 @@ $('go').onclick=async()=>{
 function show(d){
   $('res').classList.remove('hide');
   const v=['BUY','SELL'].includes(d.verdict)?d.verdict:'NO_TRADE';
-  $('vd').textContent=v.replace('_',' ');$('vd').className='badge '+v;
-  const c=Math.max(0,Math.min(100,+d.confiance||0));
-  $('cf').textContent='Confiance '+c+'/100';$('cfbar').style.width=c+'%';
+  const pc=d.plan_conditionnel,okp=!!(pc&&pc.entree&&pc.sl&&pc.tp);
+  let act=['ENTRER','ATTENDRE','PAS_DE_TRADE'].includes(d.action)?d.action:(v==='NO_TRADE'?'PAS_DE_TRADE':'ENTRER');
+  if(v==='NO_TRADE')act=okp?'ATTENDRE':'PAS_DE_TRADE';
+  const keys=[['biais','Biais H1/M15',20],['zone','Zone valide',20],['liquidite','Liquidité',15],['confluences','Confluences',10],['confirmation','Confirmation M5',15],['fraicheur','Mouvement frais',10]];
+  const cr=(d.criteres&&typeof d.criteres==='object')?d.criteres:null;
+  const T=v!=='NO_TRADE'?{sens:v,entree:d.entree,sl:d.sl,tp:d.tp}:(okp?{sens:pc.sens,entree:pc.entree,sl:pc.sl,tp:pc.tp}:null);
+  const rrv=(T&&T.entree&&T.sl&&T.tp&&T.entree!==T.sl)?Math.abs(T.tp-T.entree)/Math.abs(T.entree-T.sl):0;
+  const rrPts=rrv>=2?10:rrv>=1.5?5:0;
+  const val=x=>{const q=x&&typeof x==='object'?x.v:x;return q==='oui'||q==='partiel'?q:'non'};
+  let score=null;
+  if(cr&&T){score=rrPts;keys.forEach(k=>{const q=val(cr[k[0]]);score+=k[2]*(q==='oui'?1:q==='partiel'?.5:0)});score=Math.round(score)}
+  else if(T&&d.confiance!=null)score=Math.max(0,Math.min(100,+d.confiance||0));
+  const buy=T&&String(T.sens).toUpperCase()!=='SELL';
+  $('vd').textContent={ENTRER:'ENTRER MAINTENANT',ATTENDRE:'ATTENDRE LA VALIDATION',PAS_DE_TRADE:'PAS DE TRADE'}[act];
+  $('vd').className='badge '+(act==='ENTRER'?(buy?'BUY':'SELL'):act==='ATTENDRE'?'WAIT':'NO_TRADE');
+  $('cf').textContent=score==null?'':score+'/100 · '+(score>=70?'Solide':score>=50?'Correct':'Faible');
+  $('cfbar').style.width=(score||0)+'%';
+  const va=d.validation&&d.validation.texte?d.validation:null,sensTxt=T?(buy?'ACHAT':'VENTE'):'';
+  let vt='';
+  if(act==='ATTENDRE')vt=sensTxt+' · Attendre : '+(va?va.texte+(va.niveau?' (niveau '+va.niveau+')':''):(d.attente||'une confirmation M5 dans la zone'));
+  else if(act==='ENTRER')vt=sensTxt+' · '+(va?va.texte:(d.type_ordre==='MARCHE'?'entrée au marché':'ordre limite'))+(d.type_ordre?' ('+(d.type_ordre==='MARCHE'?'AU MARCHÉ':'LIMIT')+')':'');
+  $('val').textContent=vt;$('val').classList.toggle('hide',!vt);
   const f=x=>x?x:'-';
-  $('e').textContent=f(d.entree);$('s').textContent=f(d.sl);$('t').textContent=f(d.tp);$('rr').textContent=f(d.rr);
+  $('e').textContent=f(T&&T.entree);$('s').textContent=f(T&&T.sl);$('t').textContent=f(T&&T.tp);$('rr').textContent=rrv?rrv.toFixed(2):'-';
+  $('ck').innerHTML='';
+  $('ckt').classList.toggle('hide',!(cr&&T));
+  if(cr&&T)keys.concat([['rr','Ratio R/R',10]]).forEach(k=>{
+    let q,com,pts;
+    if(k[0]==='rr'){q=rrv>=2?'oui':rrv>=1.5?'partiel':'non';com='RR '+(rrv?rrv.toFixed(2):'-');pts=rrPts}
+    else{const x=cr[k[0]];q=val(x);com=(x&&typeof x==='object'&&x.c)||'';pts=Math.round(k[2]*(q==='oui'?1:q==='partiel'?.5:0))}
+    const r=document.createElement('div');r.className='ckr';
+    const m=document.createElement('b');m.className=q==='oui'?'ck-oui':q==='partiel'?'ck-par':'ck-non';m.textContent=q==='oui'?'✓':q==='partiel'?'◐':'✗';
+    const t=document.createElement('span');t.textContent=k[1]+(com?' : '+com:'');
+    const c=document.createElement('span');c.className='pts';c.textContent=pts+'/'+k[2];
+    r.append(m,t,c);$('ck').appendChild(r);
+  });
   $('why').textContent=d.raisons||'';
   $('pl').textContent=(d.actif_lu||d.prix_lu)?('Lu sur la capture M5 : '+(d.actif_lu||'')+(d.prix_lu?' à '+d.prix_lu:'')):'';
   $('conf').innerHTML='';(d.confluences||[]).forEach(x=>{const li=document.createElement('li');li.textContent=x;$('conf').appendChild(li)});
+  $('att').textContent=d.attente?('À surveiller : '+d.attente):'';
   $('inv').textContent=d.invalidation?'Invalidation : '+d.invalidation:'';
   const ind=real?rows(real.m5):(Array.isArray(d.indicateurs)?d.indicateurs:[]);
   const bias=x=>x.trend>0?'haussier':x.trend<0?'baissier':'neutre';
@@ -296,8 +359,62 @@ function show(d){
   $('ind').classList.toggle('hide',!ind.length);$('il').innerHTML='';
   ind.forEach(i=>{const r=document.createElement('div');r.className='ir';const a=document.createElement('span');a.textContent=(i.nom||'')+(i.valeur&&i.valeur!=='?'?' '+i.valeur:'');const b=document.createElement('span');b.className='pill '+({bull:'bull',bear:'bear'}[i.sens]||'neu');b.textContent=i.etat||'';r.append(a,b);$('il').appendChild(r)});
   $('pat').textContent=d.pattern?'Pattern détecté : '+d.pattern:'';
+  $('cv').style.display=(v==='NO_TRADE')?'none':'block';
+  $('pb').classList.toggle('hide',!okp);
+  if(okp){
+    $('pbc').textContent=(pc.sens||'')+' si le prix revient dans '+(pc.zone_min&&pc.zone_max?pc.zone_min+' - '+pc.zone_max:'la zone')+'. '+(pc.condition||'');
+    $('pbe').textContent=pc.entree;$('pbs').textContent=pc.sl;$('pbt').textContent=pc.tp;$('pbr').textContent=pc.rr||'-';
+    drawPlan(pc);
+  }
+  const sc=d.scenario,oks=!!(sc&&sc.description);
+  $('sc').classList.toggle('hide',!oks);
+  if(oks){
+    $('sct').textContent=(sc.titre||'Scénario')+(sc.biais?' ('+sc.biais+')':'');
+    $('scd').textContent=sc.description;
+    $('sce').innerHTML='';(Array.isArray(sc.etapes)?sc.etapes:[]).forEach(e=>{const li=document.createElement('li');li.textContent=e;$('sce').appendChild(li)});
+    $('sca').textContent=sc.alternatif?('Alternatif : '+sc.alternatif):'';
+    drawPath(sc);
+  }
   draw(d,v);
   $('res').scrollIntoView({behavior:'smooth'});
+}
+function drawPath(sc){
+  const src=imgs.M5,cv=$('cv3'),w=src.width,h=src.height,x=cv.getContext('2d');
+  cv.width=w;cv.height=h;x.drawImage(src,0,0);
+  const P=(sc.chemin||[]).filter(p=>p&&isFinite(p.x)&&isFinite(p.y));
+  if(P.length<2){cv.style.display='none';return}
+  cv.style.display='block';
+  const fs=Math.max(13,Math.round(w/42)),X=n=>n/1000*w,Y=n=>Math.max(0,Math.min(h,n/1000*h));
+  x.font='bold '+fs+'px system-ui,sans-serif';x.textBaseline='middle';
+  x.strokeStyle='#c9a24b';x.lineWidth=Math.max(3,w/300);x.setLineDash([14,9]);
+  x.beginPath();P.forEach((p,i)=>i?x.lineTo(X(p.x),Y(p.y)):x.moveTo(X(p.x),Y(p.y)));x.stroke();x.setLineDash([]);
+  const a=P[P.length-2],b=P[P.length-1],ang=Math.atan2(Y(b.y)-Y(a.y),X(b.x)-X(a.x)),hl=fs*1.4;
+  x.fillStyle='#c9a24b';x.beginPath();x.moveTo(X(b.x),Y(b.y));
+  x.lineTo(X(b.x)-hl*Math.cos(ang-.45),Y(b.y)-hl*Math.sin(ang-.45));
+  x.lineTo(X(b.x)-hl*Math.cos(ang+.45),Y(b.y)-hl*Math.sin(ang+.45));x.closePath();x.fill();
+  P.forEach((p,i)=>{
+    x.fillStyle='#10151c';x.strokeStyle='#c9a24b';x.lineWidth=2;
+    x.beginPath();x.arc(X(p.x),Y(p.y),fs*.65,0,7);x.fill();x.stroke();
+    x.fillStyle='#c9a24b';x.textAlign='center';x.fillText(String(i),X(p.x),Y(p.y));x.textAlign='left';
+    if(p.label){const t=String(p.label),tw=x.measureText(t).width+10,lx=X(p.x)>w*.6?X(p.x)-tw-fs:X(p.x)+fs;
+      x.fillStyle='rgba(0,0,0,.72)';x.fillRect(lx,Y(p.y)-fs*.8,tw,fs*1.6);x.fillStyle='#fff';x.fillText(t,lx+5,Y(p.y))}
+  });
+}
+function drawPlan(p){
+  const src=imgs.M5,cv=$('cv2'),w=src.width,h=src.height,x=cv.getContext('2d');
+  cv.width=w;cv.height=h;x.drawImage(src,0,0);
+  const o=p.overlay;if(!o)return;
+  const fs=Math.max(13,Math.round(w/42)),Y=n=>Math.max(0,Math.min(h,n/1000*h)),X=n=>n/1000*w;
+  x.font='bold '+fs+'px system-ui,sans-serif';x.textBaseline='middle';
+  const z=o.zone;
+  if(z&&z.ymax){const x1=X(z.xmin),x2=X(z.xmax),y1=Y(z.ymin),y2=Y(z.ymax);x.fillStyle='rgba(255,166,43,.25)';x.fillRect(x1,y1,x2-x1,y2-y1);x.strokeStyle='rgba(255,166,43,.95)';x.lineWidth=2;x.strokeRect(x1,y1,x2-x1,y2-y1);x.fillStyle='#ffa62b';x.fillText('ZONE',x1+4,y1+fs*.8)}
+  const L=(y,color,txt)=>{
+    const yy=Y(y);x.strokeStyle=color;x.lineWidth=Math.max(2,w/400);x.setLineDash([12,7]);
+    x.beginPath();x.moveTo(0,yy);x.lineTo(w,yy);x.stroke();x.setLineDash([]);
+    const tw=x.measureText(txt).width+14;x.fillStyle=color;x.fillRect(w-tw,yy-fs*.8,tw,fs*1.6);
+    x.fillStyle='#fff';x.fillText(txt,w-tw+7,yy);
+  };
+  L(o.tp_y,'#2fbf71','TP '+(p.tp||''));L(o.entry_y,'#c9a24b','SI RETOUR '+(p.entree||''));L(o.sl_y,'#e5534b','SL '+(p.sl||''));
 }
 function draw(d,v){
   const src=imgs.M5,cv=$('cv'),w=src.width,h=src.height,x=cv.getContext('2d');
@@ -320,7 +437,7 @@ function draw(d,v){
   };
   L(o.tp_y,'#2fbf71','TP '+(d.tp||''));L(o.entry_y,'#4c8dff','ENTRÉE '+(d.entree||''));L(o.sl_y,'#e5534b','SL '+(d.sl||''));
 }
-$('dl').onclick=()=>{const a=document.createElement('a');a.download='analyse-'+Date.now()+'.png';a.href=$('cv').toDataURL('image/png');a.click()};
+$('dl').onclick=()=>{const a=document.createElement('a');a.download='analyse-'+Date.now()+'.png';a.href=($('cv').style.display==='none'?$('cv2'):$('cv')).toDataURL('image/png');a.click()};
 
 /* Historique (sans les images) */
 function save(d,asset){
