@@ -1,0 +1,211 @@
+/* Scalp Analyzer — journal complet. À charger après le script principal ET plan.js. */
+(() => {
+  'use strict';
+  const DB_NAME = 'scalp-analyzer-journal-v1', STORE = 'records', MAX_RECORDS = 250;
+  const $ = id => document.getElementById(id);
+  const originalSave = window.save, originalRenderHist = window.renderHist;
+  if (typeof originalSave !== 'function' || typeof originalRenderHist !== 'function' || !$('hl') || !$('hp')) {
+    console.error('[Scalp Journal] Non chargé : fonctions/éléments de l’application introuvables. Vérifie l’ordre des scripts.');
+    return;
+  }
+  let dbPromise;
+  function openDB() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject) => {
+      if (!('indexedDB' in window)) return reject(new Error('IndexedDB indisponible'));
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(STORE)) {
+          const store = db.createObjectStore(STORE, { keyPath: 'id' });
+          store.createIndex('createdAt', 'createdAt');
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error('Ouverture IndexedDB impossible'));
+    });
+    return dbPromise;
+  }
+  function request(mode, fn) {
+    return openDB().then(db => new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, mode), store = tx.objectStore(STORE);
+      let req;
+      try { req = fn(store); } catch (e) { reject(e); return; }
+      let result;
+      if (req && 'result' in req) req.onsuccess = () => { result = req.result; };
+      tx.oncomplete = () => resolve(result);
+      tx.onerror = () => reject(tx.error || new Error('Transaction IndexedDB échouée'));
+      tx.onabort = () => reject(tx.error || new Error('Transaction IndexedDB annulée'));
+    }));
+  }
+  const getAll = () => request('readonly', s => s.getAll());
+  const put = r => request('readwrite', s => s.put(r));
+  const remove = id => request('readwrite', s => s.delete(id));
+  const num = v => { if (v === '' || v == null) return null; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null; };
+  const fmt = (v, n=2) => Number.isFinite(v) ? v.toFixed(n) : '—';
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const id = () => (crypto?.randomUUID ? crypto.randomUUID() : 'rec-'+Date.now()+'-'+Math.random().toString(36).slice(2));
+  function levels(d) {
+    const side = String(d?.verdict || '').toUpperCase(), entry = num(d?.entree), sl = num(d?.sl), tp = num(d?.tp);
+    if (!['BUY','SELL'].includes(side) || entry == null || sl == null || tp == null) return null;
+    if (entry === sl || entry === tp || sl === tp) return null;
+    if (side === 'BUY' ? !(sl < entry && entry < tp) : !(tp < entry && entry < sl)) return null;
+    return { side, entry, sl, tp, risk: Math.abs(entry-sl), reward: Math.abs(tp-entry) };
+  }
+  function snapshotCanvases() {
+    const out = {};
+    ['cv','cv2','cv3'].forEach(cid => {
+      const c = $(cid);
+      if (!c || !c.width || !c.height) return;
+      try {
+        // JPEG réduit la taille de stockage tout en gardant les annotations lisibles.
+        out[cid] = c.toDataURL('image/jpeg', 0.76);
+      } catch (e) { console.warn('[Scalp Journal] Capture non sauvegardée:', cid, e); }
+    });
+    return out;
+  }
+  function style() {
+    if ($('scalpJournalStyles')) return;
+    const s = document.createElement('style'); s.id = 'scalpJournalStyles';
+    s.textContent = `
+      #journalStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:10px 0}
+      .js-stat{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px;font-size:12px;color:var(--mut)}
+      .js-stat strong{display:block;color:var(--tx);font-size:18px;margin-top:2px}
+      .js-record{border:1px solid var(--line);border-radius:9px;padding:10px;margin:9px 0;background:var(--bg)}
+      .js-head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+      .js-meta{font-size:12px;color:var(--mut);margin:5px 0;overflow-wrap:anywhere}
+      .js-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-top:8px}
+      .js-actions button{margin:0;padding:8px 3px;font-size:12px;min-width:0}
+      .js-actions .js-secondary{background:transparent;border:1px solid var(--line);color:var(--tx)}
+      .js-actions .js-active{outline:2px solid var(--brass);outline-offset:1px}
+      .js-open{background:transparent!important;color:var(--tx)!important;border:1px solid var(--line)!important;padding:8px!important;font-size:12px!important;margin:0!important;width:auto!important}
+      #jsDetail{border:1px solid var(--brass);border-radius:9px;padding:12px;margin:10px 0;overflow-wrap:anywhere}
+      #jsDetail img{width:100%;height:auto;border-radius:7px;margin-top:8px;border:1px solid var(--line)}
+      #jsDetail pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.45 ui-monospace,monospace;background:var(--bg);padding:8px;border-radius:7px;max-height:360px;overflow:auto}
+      .js-positive{color:var(--buy)!important}.js-negative{color:var(--sell)!important}
+      .js-week{font-size:13px;color:var(--brass);margin:14px 0 5px;border-bottom:1px solid var(--line);padding-bottom:5px}
+      @media(min-width:500px){#journalStats{grid-template-columns:repeat(4,minmax(0,1fr))}}
+    `; document.head.appendChild(s);
+  }
+  function ensureUI() {
+    style();
+    if (!$('journalStats')) { const el=document.createElement('div'); el.id='journalStats'; el.setAttribute('aria-live','polite'); $('hp').insertBefore(el,$('hl')); }
+    if (!$('jsDetail')) {
+      const el=document.createElement('section'); el.id='jsDetail'; el.className='hide';
+      const h=document.createElement('h2'); h.textContent='Détail de l’analyse';
+      const body=document.createElement('div'); body.id='jsDetailBody';
+      const close=document.createElement('button'); close.type='button'; close.className='sec'; close.textContent='Fermer le détail'; close.addEventListener('click',()=>el.classList.add('hide'));
+      el.append(h,body,close); $('hp').insertBefore(el,$('hl'));
+    }
+  }
+  function weekKey(ms) {
+    const d=new Date(ms), day=(d.getDay()+6)%7; d.setDate(d.getDate()-day); d.setHours(0,0,0,0);
+    return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});
+  }
+  async function saveRecord(rec) {
+    // Purge avant l'ajout pour réduire le risque de quota saturé par les images.
+    const all=(await getAll()).sort((a,b)=>b.createdAt-a.createdAt);
+    if (all.length >= MAX_RECORDS) await Promise.all(all.slice(MAX_RECORDS-1).map(r=>remove(r.id)));
+    await put(rec); await render();
+  }
+  let storageWarning=false;
+  function warnStorage() {
+    if(storageWarning)return; storageWarning=true;
+    const p=document.createElement('p'); p.className='note'; p.style.color='var(--sell)';
+    p.textContent='Le journal complet n’a pas pu être sauvegardé sur cet appareil. L’analyse Gemini reste affichée, mais vérifie l’espace de stockage du navigateur.';
+    $('hp')?.prepend(p);
+  }
+  window.save = function(data, asset) {
+    // Le comportement historique est conservé ; une erreur du journal ne bloque jamais l'analyse.
+    try { originalSave(data, asset); } catch (e) { console.error('[Scalp Journal] Historique classique:', e); }
+    let copy;
+    try { copy = JSON.parse(JSON.stringify(data || {})); } catch (_) { copy = {}; }
+    const rec = {
+      id:id(), createdAt:Date.now(), time:new Date().toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'short'}),
+      asset:String(asset || data?.actif_lu || '?'), data:copy, charts:snapshotCanvases(), status:'pending', outcome:null
+    };
+    saveRecord(rec).catch(e=>{console.error('[Scalp Journal] Sauvegarde complète impossible:',e);warnStorage();});
+  };
+  function button(label, cls, fn) { const b=document.createElement('button'); b.type='button'; b.textContent=label; if(cls)b.className=cls; b.addEventListener('click',fn); return b; }
+  function outcome(rec,status,manualExit=null) {
+    if(status==='not_taken') return {status, label:'Non pris', exitPrice:null, points:null, r:null};
+    const lv=levels(rec.data); if(!lv)return null;
+    const exit=manualExit==null ? (status==='win'?lv.tp:lv.sl) : num(manualExit);
+    if(exit==null)return null;
+    const points=lv.side==='BUY'?exit-lv.entry:lv.entry-exit;
+    const actualStatus = points === 0 ? 'flat' : status;
+    return {status:actualStatus, exitPrice:exit, points, r:points/lv.risk, label:points === 0 ? 'À l’équilibre (sortie saisie)' : (status==='win'?(manualExit==null?'Gagnant (TP théorique)':'Gagnant (sortie saisie)'):(manualExit==null?'Perdant (SL théorique)':'Perdant (sortie saisie)'))};
+  }
+  async function setStatus(recId,status,manualExit=null) {
+    const all=await getAll(), rec=all.find(r=>r.id===recId); if(!rec)return;
+    const result=outcome(rec,status,manualExit);
+    if(!result){alert('Calcul impossible : vérifie le verdict BUY/SELL et les niveaux entrée, SL et TP.');return;}
+    rec.status=status; rec.outcome=result; rec.updatedAt=Date.now(); await put(rec); await render();
+  }
+  function addText(parent,tag,text,cls) { const e=document.createElement(tag); e.textContent=String(text??''); if(cls)e.className=cls; parent.appendChild(e); return e; }
+  function openDetail(rec) {
+    const box=$('jsDetail'), body=$('jsDetailBody'); body.replaceChildren(); const d=rec.data||{}, lv=levels(d);
+    addText(body,'p',`${rec.asset} · ${rec.time} · ${d.verdict||'—'} · ${d.action||'—'}`);
+    addText(body,'p',lv?`Entrée ${lv.entry} · SL ${lv.sl} · TP ${lv.tp} · RR ${fmt(lv.reward/lv.risk)}`:`Entrée ${d.entree??'—'} · SL ${d.sl??'—'} · TP ${d.tp??'—'} · niveaux non validés`);
+    if(rec.outcome) addText(body,'p',rec.status==='not_taken'?'Signal non pris : exclu des statistiques de performance.':`${rec.outcome.label} · ${fmt(rec.outcome.r)} R · ${fmt(rec.outcome.points)} points. Résultat calculé, pas un relevé broker.`);
+    [['raisons','Raisons'],['invalidation','Invalidation'],['attente','À surveiller']].forEach(([k,label])=>{if(d[k])addText(body,'p',`${label} : ${d[k]}`)});
+    if(d.scenario && typeof d.scenario==='object') {
+      addText(body,'h3',d.scenario.titre||'Scénario'); if(d.scenario.description)addText(body,'p',d.scenario.description);
+      if(Array.isArray(d.scenario.etapes)){const ol=document.createElement('ol');d.scenario.etapes.forEach(x=>addText(ol,'li',x));body.appendChild(ol)}
+      if(d.scenario.alternatif)addText(body,'p','Alternatif : '+d.scenario.alternatif);
+    }
+    if(Array.isArray(d.confluences)&&d.confluences.length){addText(body,'h3','Confluences');const ul=document.createElement('ul');d.confluences.forEach(x=>addText(ul,'li',x));body.appendChild(ul)}
+    if(Array.isArray(d.indicateurs)&&d.indicateurs.length){addText(body,'h3','Indicateurs');const ul=document.createElement('ul');d.indicateurs.forEach(x=>addText(ul,'li',`${x.nom||''} ${x.valeur||''} — ${x.etat||''}`));body.appendChild(ul)}
+    if(lv && rec.status!=='not_taken') {
+      addText(body,'h3','Sortie manuelle (facultatif)');
+      const label=document.createElement('label');label.textContent='Prix de sortie réel';label.htmlFor='jsManualExit';body.appendChild(label);
+      const input=document.createElement('input');input.id='jsManualExit';input.inputMode='decimal';input.placeholder='Ex. '+lv.tp;input.value=rec.outcome?.exitPrice!=null?String(rec.outcome.exitPrice):'';body.appendChild(input);
+      body.appendChild(button('Enregistrer sortie réelle','js-open',()=>{
+        const exit=num(input.value); if(exit==null){alert('Saisis un prix de sortie valide.');return;}
+        const status=exit===lv.entry?'flat':((lv.side==='BUY' ? exit>lv.entry : exit<lv.entry)?'win':'loss');
+        setStatus(rec.id,status,exit).catch(e=>{console.error(e);alert('Impossible d’enregistrer la sortie.');});
+      }));
+      addText(body,'p','La sortie manuelle est classée gagnante si elle finit du côté favorable de l’entrée, perdante sinon. Une sortie à l’équilibre sera classée gagnante/perdante selon le côté SELL/BUY : vérifie-la dans les données si elle est exactement à l’entrée.','js-meta');
+    }
+    addText(body,'h3','Données complètes de Gemini'); const pre=document.createElement('pre');pre.textContent=JSON.stringify(d,null,2);body.appendChild(pre);
+    Object.entries(rec.charts||{}).forEach(([cid,src])=>{if(typeof src!=='string'||!src.startsWith('data:image/'))return;addText(body,'p',({cv:'Graphique annoté principal',cv2:'Plan conditionnel',cv3:'Scénario visuel'})[cid]||cid);const img=document.createElement('img');img.alt=cid;img.loading='lazy';img.src=src;body.appendChild(img)});
+    box.classList.remove('hide'); box.scrollIntoView({behavior:'smooth',block:'start'});
+  }
+  async function render() {
+    ensureUI(); const all=(await getAll()).sort((a,b)=>b.createdAt-a.createdAt), done=all.filter(r=>['win','loss','flat'].includes(r.status)&&Number.isFinite(r.outcome?.r));
+    const wins=done.filter(r=>r.status==='win').length, losses=done.filter(r=>r.status==='loss').length, flat=done.filter(r=>r.status==='flat').length, netR=done.reduce((s,r)=>s+r.outcome.r,0), points=done.reduce((s,r)=>s+r.outcome.points,0), taken=done.length;
+    const currentWeek=weekKey(Date.now()), week=done.filter(r=>weekKey(r.createdAt)===currentWeek), weekWins=week.filter(r=>r.status==='win').length, weekR=week.reduce((s,r)=>s+r.outcome.r,0);
+    const stats=$('journalStats');stats.replaceChildren();
+    [['Analyses',all.length],['Gagnants',wins],['Perdants',losses],['À l’équilibre',flat],['Non pris',all.filter(r=>r.status==='not_taken').length],['Réussite',taken?Math.round(wins/taken*100)+' %':'—'],['Résultat net',`${netR>=0?'+':''}${fmt(netR)} R`],['Points nets',`${points>=0?'+':''}${fmt(points)}`],['Cette semaine',`${week.length} trades · ${weekR>=0?'+':''}${fmt(weekR)} R`]].forEach(([label,value])=>{const el=document.createElement('div');el.className='js-stat';addText(el,'span',label);const strong=addText(el,'strong',value);if(label==='Résultat net'||label==='Cette semaine')strong.classList.add((label==='Cette semaine'?weekR:netR)>=0?'js-positive':'js-negative');stats.appendChild(el)});
+    const list=$('hl');
+    if(!all.length){
+      // Ne pas effacer l'ancien historique court (localStorage) si aucune analyse complète n'existe encore.
+      const legacy=(()=>{try{return JSON.parse(localStorage.getItem('hist')||'[]')}catch(_){return []}})();
+      if(!legacy.length){list.replaceChildren();addText(list,'p','Aucune analyse sauvegardée pour le moment.','note');$('hp').classList.add('hide')}
+      else $('hp').classList.remove('hide');
+      return;
+    }
+    $('hp').classList.remove('hide');
+    list.replaceChildren();
+    let lastWeek='';
+    all.forEach(rec=>{
+      const wk=weekKey(rec.createdAt);if(wk!==lastWeek){addText(list,'h3','Semaine du '+wk,'js-week');lastWeek=wk;}
+      const d=rec.data||{},lv=levels(d),card=document.createElement('article');card.className='js-record';
+      const head=document.createElement('div');head.className='js-head';const left=document.createElement('div');addText(left,'strong',`${rec.asset} · ${d.verdict||'—'}`);addText(left,'div',`${rec.time} · ${d.action||'—'} · ${rec.outcome?.label||'En attente'}`,'js-meta');head.appendChild(left);head.appendChild(button('Ouvrir','js-open',()=>openDetail(rec)));card.appendChild(head);
+      addText(card,'p',lv?`Entrée ${lv.entry} · SL ${lv.sl} · TP ${lv.tp} · RR ${fmt(lv.reward/lv.risk)}`:'Pas de niveaux BUY/SELL cohérents pour calculer le résultat.','js-meta');
+      const actions=document.createElement('div');actions.className='js-actions';
+      [['Gagnant','win'],['Perdant','loss'],['Non pris','not_taken']].forEach(([label,status])=>{
+        const b=button(label,'js-secondary',async()=>{
+          if(status!=='not_taken'&&!lv){alert('Ce signal ne contient pas de niveaux BUY/SELL cohérents.');return;}
+          if(status!=='not_taken'&&!confirm(`Confirmer « ${label} » ? Le calcul utilise le ${status==='win'?'TP':'SL'} enregistré. Ce résultat est théorique, sauf si tu saisis une sortie réelle.`))return;
+          try{await setStatus(rec.id,status)}catch(e){console.error(e);alert('Enregistrement impossible.');}
+        });if(rec.status===status)b.classList.add('js-active');if(status!=='not_taken'&&!lv)b.disabled=true;actions.appendChild(b);
+      });card.appendChild(actions);
+      if(rec.outcome&&rec.status!=='not_taken')addText(card,'p',`Résultat : ${rec.outcome.r>=0?'+':''}${fmt(rec.outcome.r)} R · ${rec.outcome.points>=0?'+':''}${fmt(rec.outcome.points)} points. ${rec.outcome.label}.`,'js-meta');
+      list.appendChild(card);
+    });
+  }
+  window.renderHist=function(){try{originalRenderHist()}catch(e){console.warn('[Scalp Journal] Ancien rendu:',e)}render().catch(e=>{console.error('[Scalp Journal] Rendu impossible:',e);warnStorage()});};
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>render().catch(e=>{console.error(e);warnStorage()}),{once:true});
+  else render().catch(e=>{console.error(e);warnStorage()});
+})();
