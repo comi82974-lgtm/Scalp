@@ -55,6 +55,8 @@ ul{padding-left:18px;margin:6px 0}
 </head>
 <body>
 <h1>Scalp Analyzer</h1>
+<div class="pp-tabs"><button id="tabA" class="on" type="button">Analyse</button><button id="tabP" type="button">Plan hebdo</button></div>
+<div id="viewA">
 
 <div class="pan">
   <h2>Réglages</h2>
@@ -83,12 +85,15 @@ ul{padding-left:18px;margin:6px 0}
   <div class="verdict"><span class="badge" id="vd"></span><span id="cf"></span></div>
   <div class="bar"><i id="cfbar"></i></div>
   <div class="valbox hide" id="val"></div>
+  <p class="note" id="warn" style="color:var(--sell)"></p>
+  <p class="note" id="par" style="color:var(--brass)"></p>
   <div class="grid">
     <div>Entrée<b id="e"></b></div><div>SL<b id="s"></b></div><div>TP<b id="t"></b></div><div>RR<b id="rr"></b></div>
   </div>
   <h2 id="ckt" class="hide" style="margin:14px 0 4px;font-size:14px">Pourquoi ce score</h2>
   <div id="ck"></div>
   <p class="note" id="pl"></p>
+  <p class="note" id="pnote"></p>
   <canvas id="cv"></canvas>
   <button class="sec" id="dl">Enregistrer l'image annotée</button>
   <p id="why"></p>
@@ -121,6 +126,9 @@ ul{padding-left:18px;margin:6px 0}
 
 <div class="pan hide" id="hp"><h2>Historique</h2><div id="hl"></div></div>
 
+</div>
+<div id="viewP" class="hide"></div>
+
 <script>
 const $=id=>document.getElementById(id);
 const st={get(k,d){try{const v=localStorage.getItem(k);return v===null?d:v}catch(e){return d}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
@@ -146,6 +154,9 @@ RÈGLES :
 - Ne cours pas après le prix. Si le mouvement est déjà très étendu (prix loin de la dernière zone valide OB/FVG de H1 ou M15, impulsion déjà bien avancée, ou entrée seulement possible sur un micro-FVG au sommet), ne propose PAS d'entrée : réponds NO_TRADE et indique dans "attente" la zone de prix et la condition à attendre (ex. retour dans l'OB M15 vers X puis rejet).
 - plan_conditionnel : à remplir quand le trade ne peut plus être pris maintenant (entrée manquée, prix déjà parti) ou quand tu réponds NO_TRADE alors qu'un setup propre existerait si le prix revenait dans une zone (OB, FVG, retest d'une cassure, liquidité à venir). Donne sens, zone_min, zone_max, entree, sl, tp, rr (au moins 1.5), condition (la confirmation à attendre dans la zone, ex. rejet M5) et les coordonnées overlay sur la capture M5 (entry_y, sl_y, tp_y et zone {ymin,xmin,ymax,xmax}, entiers 0-1000). Si un trade est prenable maintenant, ou si aucun plan propre n'existe, mets null.
 - scenario : décris TOUJOURS (même si NO_TRADE) le scénario le plus probable pour les prochaines bougies M5/M15 : biais ("haussier", "baissier" ou "range"), description courte (2 à 3 phrases), 2 à 4 etapes concrètes avec niveaux de prix (ex. retour dans le FVG vers X, rejet, puis extension vers la liquidité à Y), chemin = les points du trajet projeté sur la capture M5 (x et y entiers 0-1000, le premier point = la dernière bougie, label court), alternatif = ce qui invaliderait ce scénario et ce qui se passerait alors. Reste cohérent avec le verdict et le plan conditionnel. C'est ta lecture du graphique, pas une certitude.
+- echelle : lis sur l'axe des prix de la capture M5 au moins 3 repères bien lisibles et espacés (un en haut, un au milieu, un en bas, plus l'étiquette du prix actuel si elle est visible). Pour chacun : prix (le nombre de l'étiquette) et y (position verticale de l'étiquette, entier de 0 à 1000, 0 = haut de l'image). L'app place ensuite les lignes à partir de ces repères et des prix : lis les y avec le plus grand soin.
+- Les graphiques doivent être NUS. Si tu vois sur une capture autre chose que des bougies et l'échelle de prix (indicateur, canal, ligne de tendance ou zone dessinée, texte, fenêtre vidéo ou popup qui cache le graphique), IGNORE-le totalement : ne l'utilise jamais comme signal, comme biais ni comme confluence, même s'il semble donner une direction. Liste-le dans parasites (textes courts). S'il masque une partie importante des bougies ou de l'échelle, dis-le dans raisons et mets fraicheur ou zone à partiel ou non.
+- Pour chaque zone de overlay.zones donne aussi pmin et pmax (prix bas et haut de la zone), et pour chaque point de scenario.chemin donne aussi le prix visé.
 - Une liquidité déjà touchée par une mèche est consommée : ne l'utilise ni comme TP ni comme confluence.
 - type_ordre : "LIMIT" (ordre en attente dans la zone) ou "MARCHE" (le prix est déjà dans la zone). Vide si NO_TRADE.
 - action : "ENTRER" si le trade est prenable maintenant (confirmation M5 déjà visible dans la zone, OU ordre limite sur une zone valide pas encore touchée) ; "ATTENDRE" s'il manque une validation ou si le trade n'existe qu'au retour du prix dans une zone (plan conditionnel) ; "PAS_DE_TRADE" sinon.
@@ -162,10 +173,10 @@ OVERLAY : coordonnées sur la capture M5, entiers de 0 à 1000 (0 = haut/gauche,
 INDICATEURS : même sur un graphique nu, estime visuellement l'état de ces indicateurs à partir des bougies : RSI (14), MACD, Volume, Tendance, EMA 50/200, Bollinger, Stochastique, ADX, Ichimoku, ATR. Donne une valeur approximative (avec ~ devant) et un état cohérent avec la valeur (ex. Stochastique "Survendu" seulement sous 20, "Suracheté" au-dessus de 80). Si tu ne peux pas estimer un indicateur, mets valeur "?" et sens "neutral". sens = "bull", "bear" ou "neutral". pattern = la figure ou le pattern principal détecté.
 
 RÉPONDS UNIQUEMENT EN JSON valide :
-{"verdict":"BUY|SELL|NO_TRADE","entree":0,"sl":0,"tp":0,"rr":0,"prix_lu":0,"actif_lu":"","type_ordre":"LIMIT","action":"ENTRER","validation":{"texte":"","niveau":0},"criteres":{"biais":{"v":"oui","c":""},"zone":{"v":"oui","c":""},"liquidite":{"v":"oui","c":""},"confluences":{"v":"oui","c":""},"confirmation":{"v":"oui","c":""},"fraicheur":{"v":"oui","c":""}},"attente":"","plan_conditionnel":{"sens":"BUY","zone_min":0,"zone_max":0,"entree":0,"sl":0,"tp":0,"rr":0,"condition":"","overlay":{"entry_y":0,"sl_y":0,"tp_y":0,"zone":{"ymin":0,"xmin":0,"ymax":0,"xmax":0}}},"scenario":{"titre":"","biais":"haussier","description":"","etapes":[""],"chemin":[{"x":0,"y":0,"label":""}],"alternatif":""},
+{"verdict":"BUY|SELL|NO_TRADE","entree":0,"sl":0,"tp":0,"rr":0,"prix_lu":0,"actif_lu":"","echelle":[{"prix":0,"y":0}],"parasites":[],"type_ordre":"LIMIT","action":"ENTRER","validation":{"texte":"","niveau":0},"criteres":{"biais":{"v":"oui","c":""},"zone":{"v":"oui","c":""},"liquidite":{"v":"oui","c":""},"confluences":{"v":"oui","c":""},"confirmation":{"v":"oui","c":""},"fraicheur":{"v":"oui","c":""}},"attente":"","plan_conditionnel":{"sens":"BUY","zone_min":0,"zone_max":0,"entree":0,"sl":0,"tp":0,"rr":0,"condition":"","overlay":{"entry_y":0,"sl_y":0,"tp_y":0,"zone":{"ymin":0,"xmin":0,"ymax":0,"xmax":0}}},"scenario":{"titre":"","biais":"haussier","description":"","etapes":[""],"chemin":[{"x":0,"y":0,"prix":0,"label":""}],"alternatif":""},
 "confluences":["..."],"invalidation":"...","raisons":"explication courte",
 "indicateurs":[{"nom":"RSI (14)","valeur":"~54","etat":"Haussier","sens":"bull"}],"pattern":"...",
-"overlay":{"entry_y":0,"sl_y":0,"tp_y":0,"zones":[{"type":"OB","label":"OB","ymin":0,"xmin":0,"ymax":0,"xmax":0}]}}`;
+"overlay":{"entry_y":0,"sl_y":0,"tp_y":0,"zones":[{"type":"OB","label":"OB","pmin":0,"pmax":0,"ymin":0,"xmin":0,"ymax":0,"xmax":0}]}}`;
 
 /* Emplacements de captures */
 function loadImg(file){return new Promise((ok,ko)=>{const r=new FileReader();r.onerror=ko;r.onload=()=>{const im=new Image();im.onerror=ko;im.onload=()=>{const s=Math.min(1,1600/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);c.getContext('2d').drawImage(im,0,0,c.width,c.height);ok(c)};im.src=r.result};r.readAsDataURL(file)})}
@@ -271,6 +282,7 @@ $('go').onclick=async()=>{
       }catch(e){warn='Données de marché indisponibles ('+e.message+'). Indicateurs estimés par Gemini.'}
     }
     const assetIn=$('asset').value.trim(),asset=assetIn||"non fourni : lis le nom de l'actif sur la capture (en haut à gauche du graphique)",price=$('price').value.trim()||"non fourni : lis-le sur la capture M5 (étiquette de prix de la dernière bougie, sur l'échelle de droite)";
+    try{if(window.ScalpPlan&&ScalpPlan.contextText)extra+=await ScalpPlan.contextText($('sym').value.trim())}catch(e){}
     const parts=[{text:PROMPT.replace('{ASSET}',asset).replace('{PRICE}',price)+extra}];
     for(const tf of ['H1','M15','M5']) if(imgs[tf]) parts.push({text:'Capture '+tf+' :'},{inline_data:{mime_type:'image/jpeg',data:imgs[tf].toDataURL('image/jpeg',.88).split(',')[1]}});
     let think=true;
@@ -316,8 +328,26 @@ function show(d){
   let act=['ENTRER','ATTENDRE','PAS_DE_TRADE'].includes(d.action)?d.action:(v==='NO_TRADE'?'PAS_DE_TRADE':'ENTRER');
   if(v==='NO_TRADE')act=okp?'ATTENDRE':'PAS_DE_TRADE';
   const keys=[['biais','Biais H1/M15',20],['zone','Zone valide',20],['liquidite','Liquidité',15],['confluences','Confluences',10],['confirmation','Confirmation M5',15],['fraicheur','Mouvement frais',10]];
-  const cr=(d.criteres&&typeof d.criteres==='object')?d.criteres:null;
+  SCALE=fitScale(d.echelle);
+  let cr=(d.criteres&&typeof d.criteres==='object')?d.criteres:null;
   const T=v!=='NO_TRADE'?{sens:v,entree:d.entree,sl:d.sl,tp:d.tp}:(okp?{sens:pc.sens,entree:pc.entree,sl:pc.sl,tp:pc.tp}:null);
+  const warns=[];
+  if(T){
+    const E=+T.entree,S=+T.sl,P=+T.tp,bu=String(T.sens).toUpperCase()!=='SELL';
+    if(bu?!(S<E&&E<P):!(P<E&&E<S))warns.push('Niveaux incohérents : vérifie SL, entrée et TP.');
+    let zmin=null,zmax=null;
+    if(v==='NO_TRADE'&&okp){zmin=+pc.zone_min;zmax=+pc.zone_max}
+    else{const zs=((d.overlay&&d.overlay.zones)||[]).filter(z=>z&&(z.type==='OB'||z.type==='FVG')&&Number(z.pmin)>0&&Number(z.pmax)>0);
+      if(zs.length){zmin=Math.min(...zs.map(z=>+z.pmin));zmax=Math.max(...zs.map(z=>+z.pmax))}}
+    if(zmin>0&&zmax>=zmin){
+      const tol=(zmax-zmin)*0.25;let bad=false;
+      if(E<zmin-tol||E>zmax+tol){warns.push('Entrée en dehors de la zone ('+zmin+' - '+zmax+').');bad=true}
+      if(bu?!(S<zmin):!(S>zmax)){warns.push('SL pas au-delà de la zone : risque de sortie prématurée.');bad=true}
+      if(bad&&cr){cr=Object.assign({},cr,{zone:{v:'non',c:'incohérent'}});warns.push('Points Zone retirés du score.')}
+    }
+    const prl=+d.prix_lu;
+    if(prl>0&&d.type_ordre==='LIMIT'&&v!=='NO_TRADE'&&(bu?E>prl*1.0003:E<prl*0.9997))warns.push('Ordre limite du mauvais côté du prix actuel : c\'est un ordre stop.');
+  }
   const rrv=(T&&T.entree&&T.sl&&T.tp&&T.entree!==T.sl)?Math.abs(T.tp-T.entree)/Math.abs(T.entree-T.sl):0;
   const rrPts=rrv>=2?10:rrv>=1.5?5:0;
   const val=x=>{const q=x&&typeof x==='object'?x.v:x;return q==='oui'||q==='partiel'?q:'non'};
@@ -334,6 +364,9 @@ function show(d){
   if(act==='ATTENDRE')vt=sensTxt+' · Attendre : '+(va?va.texte+(va.niveau?' (niveau '+va.niveau+')':''):(d.attente||'une confirmation M5 dans la zone'));
   else if(act==='ENTRER')vt=sensTxt+' · '+(va?va.texte:(d.type_ordre==='MARCHE'?'entrée au marché':'ordre limite'))+(d.type_ordre?' ('+(d.type_ordre==='MARCHE'?'AU MARCHÉ':'LIMIT')+')':'');
   $('val').textContent=vt;$('val').classList.toggle('hide',!vt);
+  $('warn').textContent=warns.join(' ');
+  const par=(Array.isArray(d.parasites)?d.parasites:[]).map(x=>String(x).trim()).filter(Boolean);
+  $('par').textContent=par.length?('Éléments détectés sur la capture, ignorés par l\'analyse : '+par.join(', ')+'. Retire-les pour une lecture plus fiable.'):'';
   const f=x=>x?x:'-';
   $('e').textContent=f(T&&T.entree);$('s').textContent=f(T&&T.sl);$('t').textContent=f(T&&T.tp);$('rr').textContent=rrv?rrv.toFixed(2):'-';
   $('ck').innerHTML='';
@@ -349,7 +382,8 @@ function show(d){
     r.append(m,t,c);$('ck').appendChild(r);
   });
   $('why').textContent=d.raisons||'';
-  $('pl').textContent=(d.actif_lu||d.prix_lu)?('Lu sur la capture M5 : '+(d.actif_lu||'')+(d.prix_lu?' à '+d.prix_lu:'')):'';
+  const pltxt=(d.actif_lu||d.prix_lu)?('Lu sur la capture M5 : '+(d.actif_lu||'')+(d.prix_lu?' à '+d.prix_lu:'')):'';
+  $('pl').textContent=pltxt+((SCALE&&SCALE.ok)?' · Lignes calées sur l\'échelle de prix.':(pltxt?' · ':'')+'Échelle de prix non lue : lignes approximatives.');
   $('conf').innerHTML='';(d.confluences||[]).forEach(x=>{const li=document.createElement('li');li.textContent=x;$('conf').appendChild(li)});
   $('att').textContent=d.attente?('À surveiller : '+d.attente):'';
   $('inv').textContent=d.invalidation?'Invalidation : '+d.invalidation:'';
@@ -376,12 +410,27 @@ function show(d){
     drawPath(sc);
   }
   draw(d,v);
+  $('pnote').textContent='';
+  try{if(window.ScalpPlan&&ScalpPlan.noteFor)ScalpPlan.noteFor($('sym').value.trim(),d.actif_lu||'',+d.prix_lu).then(t=>{$('pnote').textContent=t||''}).catch(()=>{})}catch(e){}
   $('res').scrollIntoView({behavior:'smooth'});
 }
+let SCALE=null;
+function fitScale(pts){
+  const P=(Array.isArray(pts)?pts:[]).map(p=>p?{prix:Number(p.prix),y:Number(p.y)}:null).filter(p=>p&&isFinite(p.prix)&&isFinite(p.y)&&p.prix>0);
+  if(P.length<2)return null;
+  const n=P.length,mx=P.reduce((a,p)=>a+p.prix,0)/n,my=P.reduce((a,p)=>a+p.y,0)/n;
+  let sxx=0,sxy=0;P.forEach(p=>{sxx+=(p.prix-mx)**2;sxy+=(p.prix-mx)*(p.y-my)});
+  if(!sxx)return null;
+  const b=sxy/sxx,a=my-b*mx;
+  if(!(b<0))return null;
+  let mr=0;P.forEach(p=>{mr=Math.max(mr,Math.abs(a+b*p.prix-p.y))});
+  return{a,b,maxres:mr,ok:mr<=10};
+}
+const PY=(price,fb)=>(SCALE&&SCALE.ok&&isFinite(price)&&Number(price)>0)?SCALE.a+SCALE.b*Number(price):fb;
 function drawPath(sc){
   const src=imgs.M5,cv=$('cv3'),w=src.width,h=src.height,x=cv.getContext('2d');
   cv.width=w;cv.height=h;x.drawImage(src,0,0);
-  const P=(sc.chemin||[]).filter(p=>p&&isFinite(p.x)&&isFinite(p.y));
+  const P=(Array.isArray(sc.chemin)?sc.chemin:[]).filter(p=>p&&isFinite(p.x)).map(p=>({x:+p.x,y:PY(p.prix,+p.y),label:p.label})).filter(p=>isFinite(p.y));
   if(P.length<2){cv.style.display='none';return}
   cv.style.display='block';
   const fs=Math.max(13,Math.round(w/42)),X=n=>n/1000*w,Y=n=>Math.max(0,Math.min(h,n/1000*h));
@@ -403,28 +452,28 @@ function drawPath(sc){
 function drawPlan(p){
   const src=imgs.M5,cv=$('cv2'),w=src.width,h=src.height,x=cv.getContext('2d');
   cv.width=w;cv.height=h;x.drawImage(src,0,0);
-  const o=p.overlay;if(!o)return;
+  const o=p.overlay||{};
   const fs=Math.max(13,Math.round(w/42)),Y=n=>Math.max(0,Math.min(h,n/1000*h)),X=n=>n/1000*w;
   x.font='bold '+fs+'px system-ui,sans-serif';x.textBaseline='middle';
   const z=o.zone;
-  if(z&&z.ymax){const x1=X(z.xmin),x2=X(z.xmax),y1=Y(z.ymin),y2=Y(z.ymax);x.fillStyle='rgba(255,166,43,.25)';x.fillRect(x1,y1,x2-x1,y2-y1);x.strokeStyle='rgba(255,166,43,.95)';x.lineWidth=2;x.strokeRect(x1,y1,x2-x1,y2-y1);x.fillStyle='#ffa62b';x.fillText('ZONE',x1+4,y1+fs*.8)}
+  if(z&&isFinite(PY(p.zone_max,z.ymin))&&isFinite(PY(p.zone_min,z.ymax))&&isFinite(z.xmin)&&isFinite(z.xmax)){const x1=X(z.xmin),x2=X(z.xmax),y1=Y(PY(p.zone_max,z.ymin)),y2=Y(PY(p.zone_min,z.ymax));x.fillStyle='rgba(255,166,43,.25)';x.fillRect(x1,y1,x2-x1,y2-y1);x.strokeStyle='rgba(255,166,43,.95)';x.lineWidth=2;x.strokeRect(x1,y1,x2-x1,y2-y1);x.fillStyle='#ffa62b';x.fillText('ZONE',x1+4,y1+fs*.8)}
   const L=(y,color,txt)=>{
     const yy=Y(y);x.strokeStyle=color;x.lineWidth=Math.max(2,w/400);x.setLineDash([12,7]);
     x.beginPath();x.moveTo(0,yy);x.lineTo(w,yy);x.stroke();x.setLineDash([]);
     const tw=x.measureText(txt).width+14;x.fillStyle=color;x.fillRect(w-tw,yy-fs*.8,tw,fs*1.6);
     x.fillStyle='#fff';x.fillText(txt,w-tw+7,yy);
   };
-  L(o.tp_y,'#2fbf71','TP '+(p.tp||''));L(o.entry_y,'#c9a24b','SI RETOUR '+(p.entree||''));L(o.sl_y,'#e5534b','SL '+(p.sl||''));
+  L(PY(p.tp,o.tp_y),'#2fbf71','TP '+(p.tp||''));L(PY(p.entree,o.entry_y),'#c9a24b','SI RETOUR '+(p.entree||''));L(PY(p.sl,o.sl_y),'#e5534b','SL '+(p.sl||''));
 }
 function draw(d,v){
   const src=imgs.M5,cv=$('cv'),w=src.width,h=src.height,x=cv.getContext('2d');
   cv.width=w;cv.height=h;x.drawImage(src,0,0);
-  const o=d.overlay;if(!o||v==='NO_TRADE')return;
+  const o=d.overlay||{};if(v==='NO_TRADE')return;
   const fs=Math.max(13,Math.round(w/42)),Y=n=>Math.max(0,Math.min(h,n/1000*h)),X=n=>n/1000*w;
   x.font='bold '+fs+'px system-ui,sans-serif';x.textBaseline='middle';
   const col={OB:'76,141,255',FVG:'168,110,255',LIQ:'255,166,43'};
   (o.zones||[]).forEach(z=>{
-    const c=col[z.type]||'200,200,200',x1=X(z.xmin),x2=X(z.xmax),y1=Y(z.ymin),y2=Y(z.ymax);
+    const c=col[z.type]||'200,200,200',x1=X(z.xmin),x2=X(z.xmax),y1=Y(PY(z.pmax,z.ymin)),y2=Y(PY(z.pmin,z.ymax));
     x.fillStyle='rgba('+c+',.22)';x.fillRect(x1,y1,x2-x1,y2-y1);
     x.strokeStyle='rgba('+c+',.9)';x.lineWidth=2;x.strokeRect(x1,y1,x2-x1,y2-y1);
     x.fillStyle='rgb('+c+')';x.fillText(z.label||z.type,x1+4,y1+fs*.8);
@@ -435,7 +484,7 @@ function draw(d,v){
     const tw=x.measureText(txt).width+14;x.fillStyle=color;x.fillRect(w-tw,yy-fs*.8,tw,fs*1.6);
     x.fillStyle='#fff';x.fillText(txt,w-tw+7,yy);
   };
-  L(o.tp_y,'#2fbf71','TP '+(d.tp||''));L(o.entry_y,'#4c8dff','ENTRÉE '+(d.entree||''));L(o.sl_y,'#e5534b','SL '+(d.sl||''));
+  L(PY(d.tp,o.tp_y),'#2fbf71','TP '+(d.tp||''));L(PY(d.entree,o.entry_y),'#4c8dff','ENTRÉE '+(d.entree||''));L(PY(d.sl,o.sl_y),'#e5534b','SL '+(d.sl||''));
 }
 $('dl').onclick=()=>{const a=document.createElement('a');a.download='analyse-'+Date.now()+'.png';a.href=($('cv').style.display==='none'?$('cv2'):$('cv')).toDataURL('image/png');a.click()};
 
@@ -457,5 +506,6 @@ function renderHist(){
 renderHist();
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{})}
 </script>
+<script src="plan.js"></script>
 </body>
 </html>
