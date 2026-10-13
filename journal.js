@@ -143,8 +143,36 @@
     rec.status=status; rec.outcome=result; rec.updatedAt=Date.now(); await put(rec); await render();
   }
   function addText(parent,tag,text,cls) { const e=document.createElement(tag); e.textContent=String(text??''); if(cls)e.className=cls; parent.appendChild(e); return e; }
-  function openDetail(rec) {
-    const box=$('jsDetail'), body=$('jsDetailBody'); body.replaceChildren(); const d=rec.data||{}, lv=levels(d);
+  async function openDetail(rec) {
+    const d = rec.data || {};
+    // Restaurer d'abord l'écran natif de l'application, avec l'objet Gemini sauvegardé.
+    // Cela ne relance PAS Gemini : on rappelle uniquement le rendu local de l'analyse.
+    if (typeof window.show === 'function') {
+      try { window.show(d); }
+      catch (e) { console.error('[Scalp Journal] Restauration de la vue originale impossible:', e); }
+    }
+    // Réappliquer les captures exactes des graphiques enregistrées lors de l'analyse.
+    const restoreJobs = Object.entries(rec.charts || {}).map(([cid, src]) => new Promise(resolve => {
+      const canvas = $(cid);
+      if (!canvas || typeof src !== 'string' || !src.startsWith('data:image/')) return resolve();
+      const img = new Image();
+      img.onload = () => {
+        try {
+          canvas.width = img.naturalWidth || img.width;
+          canvas.height = img.naturalHeight || img.height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        } catch (e) { console.warn('[Scalp Journal] Graphique non restauré:', cid, e); }
+        resolve();
+      };
+      img.onerror = () => resolve();
+      img.src = src;
+    }));
+    await Promise.all(restoreJobs);
+    const main = $('cv')?.closest('section') || $('cv')?.parentElement;
+    if (main) main.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Le détail complémentaire reste disponible en dessous, sans remplacer l'analyse originale.
+    const box=$('jsDetail'), body=$('jsDetailBody'); body.replaceChildren(); const lv=levels(d);
     addText(body,'p',`${rec.asset} · ${rec.time} · ${d.verdict||'—'} · ${d.action||'—'}`);
     addText(body,'p',lv?`Entrée ${lv.entry} · SL ${lv.sl} · TP ${lv.tp} · RR ${fmt(lv.reward/lv.risk)}`:`Entrée ${d.entree??'—'} · SL ${d.sl??'—'} · TP ${d.tp??'—'} · niveaux non validés`);
     if(rec.outcome) addText(body,'p',rec.status==='not_taken'?'Signal non pris : exclu des statistiques de performance.':`${rec.outcome.label} · ${fmt(rec.outcome.r)} R · ${fmt(rec.outcome.points)} points. Résultat calculé, pas un relevé broker.`);
@@ -168,8 +196,7 @@
       addText(body,'p','La sortie manuelle est classée gagnante si elle finit du côté favorable de l’entrée, perdante sinon. Une sortie à l’équilibre sera classée gagnante/perdante selon le côté SELL/BUY : vérifie-la dans les données si elle est exactement à l’entrée.','js-meta');
     }
     addText(body,'h3','Données complètes de Gemini'); const pre=document.createElement('pre');pre.textContent=JSON.stringify(d,null,2);body.appendChild(pre);
-    Object.entries(rec.charts||{}).forEach(([cid,src])=>{if(typeof src!=='string'||!src.startsWith('data:image/'))return;addText(body,'p',({cv:'Graphique annoté principal',cv2:'Plan conditionnel',cv3:'Scénario visuel'})[cid]||cid);const img=document.createElement('img');img.alt=cid;img.loading='lazy';img.src=src;body.appendChild(img)});
-    box.classList.remove('hide'); box.scrollIntoView({behavior:'smooth',block:'start'});
+    box.classList.remove('hide');
   }
   async function render() {
     ensureUI(); const all=(await getAll()).sort((a,b)=>b.createdAt-a.createdAt), done=all.filter(r=>['win','loss','flat'].includes(r.status)&&Number.isFinite(r.outcome?.r));
