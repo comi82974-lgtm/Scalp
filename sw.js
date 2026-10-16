@@ -1,6 +1,6 @@
-/* Scalp Analyzer — cache v18 + chargement automatique du journal.
+/* Scalp Analyzer — cache v19 + chargement automatique du journal.
    Ce SW injecte journal.js dans index.html pour éviter de modifier le fichier principal. */
-const C = 'scalp-v18';
+const C = 'scalp-v19';
 const F = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './plan.js', './journal.js'];
 
 self.addEventListener('install', event => {
@@ -27,7 +27,7 @@ self.addEventListener('fetch', event => {
         if (!response.ok) return response;
         const html = await response.text();
         if (html.includes('journal.js')) return new Response(html, { status: response.status, statusText: response.statusText, headers: response.headers });
-        const script = '<script src="./journal.js?v=18"></script>';
+        const script = '<script src="./journal.js?v=19"></script>';
         const injected = html.replace(/<\/body\s*>/i, script + '</body>');
         if (injected === html) return response;
         const headers = new Headers(response.headers);

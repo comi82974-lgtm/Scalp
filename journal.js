@@ -46,9 +46,20 @@
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const id = () => (crypto?.randomUUID ? crypto.randomUUID() : 'rec-'+Date.now()+'-'+Math.random().toString(36).slice(2));
   function levels(d) {
-    const side = String(d?.verdict || '').toUpperCase(), entry = num(d?.entree), sl = num(d?.sl), tp = num(d?.tp);
-    if (!['BUY','SELL'].includes(side) || entry == null || sl == null || tp == null) return null;
+    const verdict = String(d?.verdict || '').toUpperCase();
+    const entry = num(d?.entree), sl = num(d?.sl), tp = num(d?.tp);
+    if (entry == null || sl == null || tp == null) return null;
     if (entry === sl || entry === tp || sl === tp) return null;
+
+    // BUY/SELL garde son sens explicite. Pour NO_TRADE, on n'invente rien :
+    // le sens n'est déduit que si l'ordre réel des niveaux entrée/SL/TP est univoque.
+    let side = verdict;
+    if (verdict === 'NO_TRADE') {
+      if (sl < entry && entry < tp) side = 'BUY';
+      else if (tp < entry && entry < sl) side = 'SELL';
+      else return null;
+    }
+    if (!['BUY','SELL'].includes(side)) return null;
     if (side === 'BUY' ? !(sl < entry && entry < tp) : !(tp < entry && entry < sl)) return null;
     return { side, entry, sl, tp, risk: Math.abs(entry-sl), reward: Math.abs(tp-entry) };
   }
@@ -222,7 +233,10 @@
         const b=button(label,'js-secondary',async()=>{
           const noTrade=String(d.verdict||'').toUpperCase()==='NO_TRADE';
           if(status!=='not_taken'&&!lv&&!noTrade){alert('Ce signal ne contient pas de niveaux BUY/SELL cohérents.');return;}
-          if(status!=='not_taken'&&!confirm(noTrade?`Confirmer « ${label} » pour cette opportunité NO_TRADE ? Elle sera comptée dans les résultats, sans calcul de gain/perte en R.`:`Confirmer « ${label} » ? Le calcul utilise le ${status==='win'?'TP':'SL'} enregistré. Ce résultat est théorique, sauf si tu saisis une sortie réelle.`))return;
+          if(status!=='not_taken'&&!confirm(noTrade
+            ? (lv ? `Confirmer « ${label} » pour cette opportunité NO_TRADE ? Les points et le RR seront calculés théoriquement à partir de l’entrée, du SL et du TP enregistrés.`
+                 : `Confirmer « ${label} » pour cette opportunité NO_TRADE ? Elle sera comptée comme résultat manuel, sans points ni RR car les niveaux ne permettent pas de calcul fiable.`)
+            : `Confirmer « ${label} » ? Le calcul utilise le ${status==='win'?'TP':'SL'} enregistré. Ce résultat est théorique, sauf si tu saisis une sortie réelle.`))return;
           try{await setStatus(rec.id,status)}catch(e){console.error(e);alert('Enregistrement impossible.');}
         });if(rec.status===status)b.classList.add('js-active');if(status!=='not_taken'&&!lv&&String(d.verdict||'').toUpperCase()!=='NO_TRADE')b.disabled=true;actions.appendChild(b);
       });card.appendChild(actions);
