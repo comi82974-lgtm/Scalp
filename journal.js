@@ -123,21 +123,26 @@
     try { copy = JSON.parse(JSON.stringify(data || {})); } catch (_) { copy = {}; }
     const rec = {
       id:id(), createdAt:Date.now(), time:new Date().toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'short'}),
-      asset:String(asset || data?.actif_lu || '?'), data:copy, charts:snapshotCanvases(), status:'pending', outcome:null,
+      asset:String(asset || data?.actif_lu || '?'), data:copy, charts:snapshotCanvases(), status:'not_taken', outcome:{status:'not_taken',label:'Non pris',exitPrice:null,points:null,r:null},
       opportunityType:String(copy.verdict||'').toUpperCase()==='NO_TRADE'?'confirmation_or_no_setup':(['BUY','SELL'].includes(String(copy.verdict||'').toUpperCase())?'trade_signal':'analysis')
     };
     saveRecord(rec).catch(e=>{console.error('[Scalp Journal] Sauvegarde complète impossible:',e);warnStorage();});
   };
   function button(label, cls, fn) { const b=document.createElement('button'); b.type='button'; b.textContent=label; if(cls)b.className=cls; b.addEventListener('click',fn); return b; }
   function outcome(rec,status,manualExit=null) {
-    if(status==='pending') return {status, label:'En attente de confirmation / ordre limite', exitPrice:null, points:null, r:null};
     if(status==='not_taken') return {status, label:'Non pris', exitPrice:null, points:null, r:null};
-    const lv=levels(rec.data); if(!lv)return null;
+    const lv=levels(rec.data);
+    // NO_TRADE reste une opportunité comptabilisable : son résultat peut être marqué
+    // manuellement, mais aucun P&L/R n'est inventé sans direction et niveaux valides.
+    if(!lv && String(rec.data?.verdict||'').toUpperCase()==='NO_TRADE') {
+      return {status, exitPrice:null, points:null, r:null, label:status==='win'?'Gagnant (résultat manuel, sans P&L)':status==='loss'?'Perdant (résultat manuel, sans P&L)':'À l’équilibre'};
+    }
+    if(!lv)return null;
     const exit=manualExit==null ? (status==='win'?lv.tp:lv.sl) : num(manualExit);
     if(exit==null)return null;
     const points=lv.side==='BUY'?exit-lv.entry:lv.entry-exit;
-    const actualStatus = points === 0 ? 'flat' : status;
-    return {status:actualStatus, exitPrice:exit, points, r:points/lv.risk, label:points === 0 ? 'À l’équilibre (sortie saisie)' : (status==='win'?(manualExit==null?'Gagnant (TP théorique)':'Gagnant (sortie saisie)'):(manualExit==null?'Perdant (SL théorique)':'Perdant (sortie saisie)'))};
+    if(points === 0) return {status:'not_taken',exitPrice:exit,points:null,r:null,label:'Non pris (sortie au prix d’entrée)'};
+    return {status, exitPrice:exit, points, r:points/lv.risk, label:status==='win'?(manualExit==null?'Gagnant (TP théorique)':'Gagnant (sortie saisie)'):(manualExit==null?'Perdant (SL théorique)':'Perdant (sortie saisie)')};
   }
   async function setStatus(recId,status,manualExit=null) {
     const all=await getAll(), rec=all.find(r=>r.id===recId); if(!rec)return;
@@ -155,7 +160,7 @@
     const box=$('jsDetail'), body=$('jsDetailBody'); body.replaceChildren(); const lv=levels(d);
     addText(body,'p',`${rec.asset} · ${rec.time} · ${d.verdict||'—'} · ${d.action||'—'}`);
     addText(body,'p',lv?`Entrée ${lv.entry} · SL ${lv.sl} · TP ${lv.tp} · RR ${fmt(lv.reward/lv.risk)}`:`Entrée ${d.entree??'—'} · SL ${d.sl??'—'} · TP ${d.tp??'—'} · niveaux non validés`);
-    if(rec.outcome) addText(body,'p',rec.status==='not_taken'?'Signal non pris : exclu des statistiques de performance.':rec.status==='pending'?'Signal/ordre en attente : compté dans les configurations à suivre, pas encore dans les résultats gagnants/perdants.':`${rec.outcome.label} · ${fmt(rec.outcome.r)} R · ${fmt(rec.outcome.points)} points. Résultat calculé, pas un relevé broker.`);
+    if(rec.outcome) addText(body,'p',rec.status==='not_taken'?'Signal non pris : exclu du taux de réussite.':`${rec.outcome.label} · ${fmt(rec.outcome.r)} R · ${fmt(rec.outcome.points)} points. Résultat calculé, pas un relevé broker.`);
     [['raisons','Raisons'],['invalidation','Invalidation'],['attente','À surveiller']].forEach(([k,label])=>{if(d[k])addText(body,'p',`${label} : ${d[k]}`)});
     if(d.scenario && typeof d.scenario==='object') {
       addText(body,'h3',d.scenario.titre||'Scénario'); if(d.scenario.description)addText(body,'p',d.scenario.description);
@@ -170,25 +175,32 @@
       const input=document.createElement('input');input.id='jsManualExit';input.inputMode='decimal';input.placeholder='Ex. '+lv.tp;input.value=rec.outcome?.exitPrice!=null?String(rec.outcome.exitPrice):'';body.appendChild(input);
       body.appendChild(button('Enregistrer sortie réelle','js-open',()=>{
         const exit=num(input.value); if(exit==null){alert('Saisis un prix de sortie valide.');return;}
-        const status=exit===lv.entry?'flat':((lv.side==='BUY' ? exit>lv.entry : exit<lv.entry)?'win':'loss');
+        const status=exit===lv.entry?'not_taken':((lv.side==='BUY' ? exit>lv.entry : exit<lv.entry)?'win':'loss');
         setStatus(rec.id,status,exit).catch(e=>{console.error(e);alert('Impossible d’enregistrer la sortie.');});
       }));
       addText(body,'p','La sortie manuelle est évaluée par rapport à l’entrée et au sens BUY/SELL. Vérifie le résultat affiché avant de l’utiliser dans tes statistiques.','js-meta');
     }
-    addText(body,'h3','Données complètes de Gemini'); const pre=document.createElement('pre');pre.textContent=JSON.stringify(d,null,2);body.appendChild(pre);
+    // Afficher d'abord les visuels sauvegardés, puis garder la réponse brute Gemini
+    // disponible seulement sur demande, dans une section repliée par défaut.
     Object.entries(rec.charts||{}).forEach(([cid,src])=>{if(typeof src!=='string'||!src.startsWith('data:image/'))return;addText(body,'p',({cv:'Graphique annoté principal',cv2:'Plan conditionnel',cv3:'Scénario visuel'})[cid]||cid);const img=document.createElement('img');img.alt=cid;img.loading='lazy';img.src=src;body.appendChild(img)});
+    const raw=document.createElement('details'); raw.id='jsRawData';
+    const summary=document.createElement('summary'); summary.textContent='Afficher les données brutes de Gemini (technique)'; raw.appendChild(summary);
+    const pre=document.createElement('pre'); pre.textContent=typeof d==='string'?d:JSON.stringify(d,null,2); raw.appendChild(pre); body.appendChild(raw);
     box.classList.remove('hide'); box.scrollIntoView({behavior:'smooth',block:'start'});
   }
   async function render() {
-    ensureUI(); const all=(await getAll()).sort((a,b)=>b.createdAt-a.createdAt), done=all.filter(r=>['win','loss','flat'].includes(r.status)&&Number.isFinite(r.outcome?.r));
-    const wins=done.filter(r=>r.status==='win').length, losses=done.filter(r=>r.status==='loss').length, flat=done.filter(r=>r.status==='flat').length, netR=done.reduce((s,r)=>s+r.outcome.r,0), points=done.reduce((s,r)=>s+r.outcome.points,0), taken=done.length;
-    const pending=all.filter(r=>r.status==='pending').length;
+    ensureUI(); const records=await getAll();
+    // Migration : les anciens statuts d’attente et d’équilibre deviennent « Non pris » pour ne garder que 3 statuts.
+    for(const r of records){if(r.status==='pending'||r.status==='flat'||!r.status){r.status='not_taken';r.outcome={status:'not_taken',label:'Non pris',exitPrice:null,points:null,r:null};await put(r);}}
+    const all=records.sort((a,b)=>b.createdAt-a.createdAt), done=all.filter(r=>['win','loss'].includes(r.status)&&Number.isFinite(r.outcome?.r));
+    const wins=all.filter(r=>r.status==='win').length, losses=all.filter(r=>r.status==='loss').length;
+    const netR=done.reduce((s,r)=>s+r.outcome.r,0), points=done.reduce((s,r)=>s+r.outcome.points,0), taken=wins+losses;
     const noTrade=all.filter(r=>String(r.data?.verdict||'').toUpperCase()==='NO_TRADE').length;
     const executable=all.filter(r=>['BUY','SELL'].includes(String(r.data?.verdict||'').toUpperCase())).length;
     const currentWeek=weekKey(Date.now()), week=done.filter(r=>weekKey(r.createdAt)===currentWeek), weekWins=week.filter(r=>r.status==='win').length, weekR=week.reduce((s,r)=>s+r.outcome.r,0);
     const weekSetups=all.filter(r=>weekKey(r.createdAt)===currentWeek).length;
     const stats=$('journalStats');stats.replaceChildren();
-    [['Total des opportunités',all.length],['NO_TRADE à suivre',noTrade],['BUY / SELL proposés',executable],['En attente / limites',pending],['Gagnants',wins],['Perdants',losses],['À l’équilibre',flat],['Non pris',all.filter(r=>r.status==='not_taken').length],['Réussite',taken?Math.round(wins/taken*100)+' %':'—'],['Résultat net',`${netR>=0?'+':''}${fmt(netR)} R`],['Points nets',`${points>=0?'+':''}${fmt(points)}`],['Cette semaine',`${weekSetups} signaux · ${week.length} clôturés · ${weekR>=0?'+':''}${fmt(weekR)} R`]].forEach(([label,value])=>{const el=document.createElement('div');el.className='js-stat';addText(el,'span',label);const strong=addText(el,'strong',value);if(label==='Résultat net'||label==='Cette semaine')strong.classList.add((label==='Cette semaine'?weekR:netR)>=0?'js-positive':'js-negative');stats.appendChild(el)});
+    [['Total des analyses',all.length],['NO_TRADE',noTrade],['BUY / SELL proposés',executable],['Gagnants',wins],['Perdants',losses],['Non pris',all.filter(r=>r.status==='not_taken').length],['Réussite',taken?Math.round(wins/taken*100)+' %':'—'],['Résultat net',`${netR>=0?'+':''}${fmt(netR)} R`],['Points nets',`${points>=0?'+':''}${fmt(points)}`],['Cette semaine',`${weekSetups} signaux · ${week.length} clôturés · ${weekR>=0?'+':''}${fmt(weekR)} R`]].forEach(([label,value])=>{const el=document.createElement('div');el.className='js-stat';addText(el,'span',label);const strong=addText(el,'strong',value);if(label==='Résultat net'||label==='Cette semaine')strong.classList.add((label==='Cette semaine'?weekR:netR)>=0?'js-positive':'js-negative');stats.appendChild(el)});
     const list=$('hl');
     if(!all.length){
       // Ne pas effacer l'ancien historique court (localStorage) si aucune analyse complète n'existe encore.
@@ -203,18 +215,18 @@
     all.forEach(rec=>{
       const wk=weekKey(rec.createdAt);if(wk!==lastWeek){addText(list,'h3','Semaine du '+wk,'js-week');lastWeek=wk;}
       const d=rec.data||{},lv=levels(d),card=document.createElement('article');card.className='js-record';
-      const head=document.createElement('div');head.className='js-head';const left=document.createElement('div');addText(left,'strong',`${rec.asset} · ${d.verdict||'—'}`);addText(left,'div',`${rec.time} · ${d.action||'—'} · ${rec.outcome?.label||(rec.status==='pending'?'En attente / limite':'—')}`,'js-meta');head.appendChild(left);head.appendChild(button('Ouvrir','js-open',()=>openDetail(rec)));card.appendChild(head);
+      const head=document.createElement('div');head.className='js-head';const left=document.createElement('div');addText(left,'strong',`${rec.asset} · ${d.verdict||'—'}`);addText(left,'div',`${rec.time} · ${d.action||'—'} · ${rec.outcome?.label||'Non pris'}`,'js-meta');head.appendChild(left);head.appendChild(button('Ouvrir','js-open',()=>openDetail(rec)));card.appendChild(head);
       addText(card,'p',lv?`Entrée ${lv.entry} · SL ${lv.sl} · TP ${lv.tp} · RR ${fmt(lv.reward/lv.risk)}`:'Pas de niveaux BUY/SELL cohérents pour calculer le résultat.','js-meta');
       const actions=document.createElement('div');actions.className='js-actions';
-      [['En attente / limite','pending'],['Gagnant','win'],['Perdant','loss'],['Non pris','not_taken']].forEach(([label,status])=>{
+      [['Non pris','not_taken'],['Gagnant','win'],['Perdant','loss']].forEach(([label,status])=>{
         const b=button(label,'js-secondary',async()=>{
-          if(status==='pending'){try{await setStatus(rec.id,'pending')}catch(e){console.error(e);alert('Enregistrement impossible.')}return;}
-          if(status!=='not_taken'&&!lv){alert('Ce signal ne contient pas de niveaux BUY/SELL cohérents.');return;}
-          if(status!=='not_taken'&&!confirm(`Confirmer « ${label} » ? Le calcul utilise le ${status==='win'?'TP':'SL'} enregistré. Ce résultat est théorique, sauf si tu saisis une sortie réelle.`))return;
+          const noTrade=String(d.verdict||'').toUpperCase()==='NO_TRADE';
+          if(status!=='not_taken'&&!lv&&!noTrade){alert('Ce signal ne contient pas de niveaux BUY/SELL cohérents.');return;}
+          if(status!=='not_taken'&&!confirm(noTrade?`Confirmer « ${label} » pour cette opportunité NO_TRADE ? Elle sera comptée dans les résultats, sans calcul de gain/perte en R.`:`Confirmer « ${label} » ? Le calcul utilise le ${status==='win'?'TP':'SL'} enregistré. Ce résultat est théorique, sauf si tu saisis une sortie réelle.`))return;
           try{await setStatus(rec.id,status)}catch(e){console.error(e);alert('Enregistrement impossible.');}
-        });if(rec.status===status)b.classList.add('js-active');if(status!=='not_taken'&&!lv)b.disabled=true;actions.appendChild(b);
+        });if(rec.status===status)b.classList.add('js-active');if(status!=='not_taken'&&!lv&&String(d.verdict||'').toUpperCase()!=='NO_TRADE')b.disabled=true;actions.appendChild(b);
       });card.appendChild(actions);
-      if(rec.outcome&&rec.status!=='not_taken')addText(card,'p',`Résultat : ${rec.outcome.r>=0?'+':''}${fmt(rec.outcome.r)} R · ${rec.outcome.points>=0?'+':''}${fmt(rec.outcome.points)} points. ${rec.outcome.label}.`,'js-meta');
+      if(rec.outcome&&['win','loss'].includes(rec.status))addText(card,'p',`Résultat : ${rec.outcome.r>=0?'+':''}${fmt(rec.outcome.r)} R · ${rec.outcome.points>=0?'+':''}${fmt(rec.outcome.points)} points. ${rec.outcome.label}.`,'js-meta');
       list.appendChild(card);
     });
   }
