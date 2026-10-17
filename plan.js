@@ -1137,7 +1137,7 @@ P.contextText = async function (sym) {
   try { const r = await planFor(sym, ''); if (!r) return ''; const { p, a } = r, an = a.analysis, tr = a.tracking, z = an.zones;
     const zs = z.map(q => `${q.id} ${q.side} ${fp(q.lo, an.price)}-${fp(q.hi, an.price)} (${q.kinds.join('+')}${tr && tr.zones[q.id] ? ', statut ' + (ST_FR[tr.zones[q.id]] || tr.zones[q.id]) : ''})`).join(' ; ');
     const sc = ['bull', 'bear'].map(k => { const s = an.scenarios[k]; return s.zone ? `${k === 'bull' ? 'haussier' : 'baissier'} : zone ${s.zoneId}, invalidation ${fp(s.inv, an.price)}${tr && tr.scenarios[k] ? ', statut ' + tr.scenarios[k].status : ''}` : `${k === 'bull' ? 'haussier' : 'baissier'} : aucun`; }).join(' ; ');
-    return `\n\nPLAN HEBDO (${weekLabel(p.id)}, calculé sur des données réelles) : biais ${an.bias.label}. Zones : ${zs}. Scénarios : ${sc}.\nUtilise ce plan comme CONTEXTE seulement : dis si le setup se trouve dans une zone du plan. Un contact avec une zone n'est pas un signal d'entrée et ne justifie jamais un trade à lui seul.`; } catch (e) { return ''; }
+    return `\n\nPLAN HEBDO (${weekLabel(p.id)}, calculé sur des données réelles) : biais ${an.bias.label}. Zones : ${zs}. Scénarios : ${sc}.\nRÈGLE PLAN HEBDO : information seulement. Ne change JAMAIS le verdict, l'entrée, le SL, le TP ni les criteres à cause de ce plan : analyse et décide exactement comme si ce plan n'existait pas. Un setup M5 propre reste valide même hors des zones du plan ou contre son biais : ne le rejette pas, ne passe pas en NO_TRADE ni en ATTENDRE pour cette raison, et ne compte pas le plan comme une confluence. Dis seulement, en une courte phrase dans « raisons », si le setup est dans une zone du plan ou contre son biais.`; } catch (e) { return ''; }
 };
 P.noteFor = async function (sym, name, price) {
   try { const r = await planFor(sym, name); if (!r || !(price > 0)) return ''; const an = r.a.analysis, tr = r.a.tracking;
@@ -1145,6 +1145,20 @@ P.noteFor = async function (sym, name, price) {
     let t = inside ? `Plan hebdo : le prix est dans la zone ${inside.id} (${inside.side} ${fp(inside.lo, an.price)} – ${fp(inside.hi, an.price)})${tr && tr.zones[inside.id] ? ', statut ' + (ST_FR[tr.zones[inside.id]] || '') : ''}. Une zone touchée n'est pas un signal d'entrée.` : (() => { const n = [...an.zones].sort((a, b) => Math.min(Math.abs(price - a.lo), Math.abs(price - a.hi)) - Math.min(Math.abs(price - b.lo), Math.abs(price - b.hi)))[0]; return n ? `Plan hebdo : zone la plus proche ${n.id} (${n.side}) à ${fp(Math.min(Math.abs(price - n.lo), Math.abs(price - n.hi)), an.price)} points.` : ''; })();
     if (tr && tr.needsRefresh) t += ' Le plan nécessite une actualisation.'; return t; } catch (e) { return ''; }
 };
+/* ---- Détection automatique de l'actif (onglet Analyse) ---- */
+const CCY = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD', 'CAD'];
+const ALIASES = [
+  [['XAUUSD', 'XAU', 'GOLD'], 'XAU/USD'], [['XAGUSD', 'XAG', 'SILVER'], 'XAG/USD'],
+  [['US30', 'DJ30', 'DJI', 'DOWJONES', 'WALLSTREET'], 'DJI'],
+  [['BTCUSD', 'BTC', 'BITCOIN'], 'BTC/USD'], [['ETHUSD', 'ETH', 'ETHEREUM'], 'ETH/USD']];
+// « XAUUSD M5 », « Gold », « US30 » → symbole Twelve Data (même format que les actifs du plan). '' si inconnu.
+P.resolveSymbol = function (text) {
+  const n = norm(text); if (!n) return '';
+  for (const [keys, sym] of ALIASES) if (keys.some(k => n.startsWith(k))) return sym;
+  const a = n.slice(0, 3), b = n.slice(3, 6);
+  return (CCY.includes(a) && CCY.includes(b) && a !== b) ? a + '/' + b : '';
+};
+P.hasPlan = async function (sym) { try { return !!(await planFor(sym, '')); } catch (e) { return false; } };
 P.T = T; P.chartModel = chartModel; P.weekIdFor = weekIdFor; P.weekRange = weekRange; P._UI = UI;
 root.ScalpPlan = P;
 if (typeof document !== 'undefined') { const go = () => { if (document.getElementById('viewP')) P.init(); }; if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go(); }
