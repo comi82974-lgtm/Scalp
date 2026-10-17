@@ -47,7 +47,10 @@
   const id = () => (crypto?.randomUUID ? crypto.randomUUID() : 'rec-'+Date.now()+'-'+Math.random().toString(36).slice(2));
   function levels(d) {
     const verdict = String(d?.verdict || '').toUpperCase();
-    const entry = num(d?.entree), sl = num(d?.sl), tp = num(d?.tp);
+    let entry = num(d?.entree), sl = num(d?.sl), tp = num(d?.tp);
+    // NO_TRADE avec plan conditionnel : le trade pris au retour du prix utilise les niveaux du plan.
+    const pc = d?.plan_conditionnel; let planSide = '';
+    if (verdict === 'NO_TRADE' && pc && !(entry > 0 && sl > 0 && tp > 0)) { entry = num(pc.entree); sl = num(pc.sl); tp = num(pc.tp); planSide = String(pc.sens || '').toUpperCase(); }
     if (entry == null || sl == null || tp == null) return null;
     if (entry === sl || entry === tp || sl === tp) return null;
 
@@ -60,6 +63,7 @@
       else return null;
     }
     if (!['BUY','SELL'].includes(side)) return null;
+    if (planSide && ['BUY','SELL'].includes(planSide) && side !== planSide) return null; // sens du plan incohérent avec ses niveaux
     if (side === 'BUY' ? !(sl < entry && entry < tp) : !(tp < entry && entry < sl)) return null;
     return { side, entry, sl, tp, risk: Math.abs(entry-sl), reward: Math.abs(tp-entry) };
   }
@@ -203,6 +207,8 @@
     ensureUI(); const records=await getAll();
     // Migration : les anciens statuts d’attente et d’équilibre deviennent « Non pris » pour ne garder que 3 statuts.
     for(const r of records){if(r.status==='pending'||r.status==='flat'||!r.status){r.status='not_taken';r.outcome={status:'not_taken',label:'Non pris',exitPrice:null,points:null,r:null};await put(r);}}
+    // Résultats marqués à la main « sans P&L » : recalculés (TP/SL théorique) si les niveaux du plan conditionnel sont exploitables.
+    for(const r of records){if((r.status==='win'||r.status==='loss')&&r.outcome&&!Number.isFinite(r.outcome.r)){const o=outcome(r,r.status);if(o&&Number.isFinite(o.r)){r.outcome=o;await put(r);}}}
     const all=records.sort((a,b)=>b.createdAt-a.createdAt), done=all.filter(r=>['win','loss'].includes(r.status)&&Number.isFinite(r.outcome?.r));
     const wins=all.filter(r=>r.status==='win').length, losses=all.filter(r=>r.status==='loss').length;
     const netR=done.reduce((s,r)=>s+r.outcome.r,0), points=done.reduce((s,r)=>s+r.outcome.points,0), taken=wins+losses;
