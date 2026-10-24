@@ -100,6 +100,7 @@
       #jsRawData{margin-top:12px} #jsRawData summary{cursor:pointer;color:var(--mut);padding:8px 0}
       .js-positive{color:var(--buy)!important}.js-negative{color:var(--sell)!important}
       .js-week{font-size:13px;color:var(--brass);margin:14px 0 5px;border-bottom:1px solid var(--line);padding-bottom:5px}
+      summary.js-week{cursor:pointer;padding:8px 0;list-style:none}summary.js-week::-webkit-details-marker{display:none}summary.js-week::before{content:'▸ '}details[open]>summary.js-week::before{content:'▾ '}
       @media(min-width:500px){#journalStats{grid-template-columns:repeat(4,minmax(0,1fr))}}
     `; document.head.appendChild(s);
   }
@@ -124,6 +125,7 @@
     if (all.length >= MAX_RECORDS) await Promise.all(all.slice(MAX_RECORDS-1).map(r=>remove(r.id)));
     await put(rec); await render();
   }
+  const weekOpen=new Map(); // état ouvert/fermé de chaque semaine (conservé entre les rendus)
   let storageWarning=false;
   function warnStorage() {
     if(storageWarning)return; storageWarning=true;
@@ -228,9 +230,18 @@
     }
     $('hp').classList.remove('hide');
     list.replaceChildren();
-    let lastWeek='';
+    let lastWeek='',cur=list;
     all.forEach(rec=>{
-      const wk=weekKey(rec.createdAt);if(wk!==lastWeek){addText(list,'h3','Semaine du '+wk,'js-week');lastWeek=wk;}
+      const wk=weekKey(rec.createdAt);
+      if(wk!==lastWeek){
+        // Une section repliable par semaine : seule la semaine en cours est ouverte par défaut.
+        const grp=all.filter(r=>weekKey(r.createdAt)===wk), closed=grp.filter(r=>['win','loss'].includes(r.status)&&Number.isFinite(r.outcome?.r)), wr=closed.reduce((s,r)=>s+r.outcome.r,0);
+        const det=document.createElement('details');det.className='js-weekbox';det.open=weekOpen.has(wk)?weekOpen.get(wk):wk===currentWeek;
+        const sum=document.createElement('summary');sum.className='js-week';
+        sum.textContent=`Semaine du ${wk}${wk===currentWeek?' (en cours)':''} · ${grp.length} signaux · ${closed.length?(wr>=0?'+':'')+fmt(wr)+' R':'aucun clôturé'}`;
+        det.appendChild(sum);det.addEventListener('toggle',()=>weekOpen.set(wk,det.open));
+        list.appendChild(det);cur=det;lastWeek=wk;
+      }
       const d=rec.data||{},lv=levels(d),card=document.createElement('article');card.className='js-record';
       const head=document.createElement('div');head.className='js-head';const left=document.createElement('div');addText(left,'strong',`${rec.asset} · ${d.verdict||'—'}`);addText(left,'div',`${rec.time} · ${d.action||'—'} · ${rec.outcome?.label||'Non pris'}`,'js-meta');head.appendChild(left);head.appendChild(button('Ouvrir','js-open',()=>openDetail(rec)));card.appendChild(head);
       addText(card,'p',lv?`Entrée ${lv.entry} · SL ${lv.sl} · TP ${lv.tp} · RR ${fmt(lv.reward/lv.risk)}`:'Pas de niveaux BUY/SELL cohérents pour calculer le résultat.','js-meta');
@@ -247,7 +258,7 @@
         });if(rec.status===status)b.classList.add('js-active');if(status!=='not_taken'&&!lv&&String(d.verdict||'').toUpperCase()!=='NO_TRADE')b.disabled=true;actions.appendChild(b);
       });card.appendChild(actions);
       if(rec.outcome&&['win','loss'].includes(rec.status))addText(card,'p',`Résultat : ${rec.outcome.r>=0?'+':''}${fmt(rec.outcome.r)} R · ${rec.outcome.points>=0?'+':''}${fmt(rec.outcome.points)} points. ${rec.outcome.label}.`,'js-meta');
-      list.appendChild(card);
+      cur.appendChild(card);
     });
   }
   window.renderHist=function(){try{originalRenderHist()}catch(e){console.warn('[Scalp Journal] Ancien rendu:',e)}render().catch(e=>{console.error('[Scalp Journal] Rendu impossible:',e);warnStorage()});};
