@@ -527,8 +527,14 @@ function renderHist(){
     $('hl').appendChild(r)});
 }
 renderHist();
-if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{})}
+if('serviceWorker' in navigator){
+  const hadSW=!!navigator.serviceWorker.controller;
+  // Quand une nouvelle version de l'app est installée, la page se recharge seule (sauf pendant une analyse).
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(!hadSW||window.__rl)return;window.__rl=1;const g=document.getElementById('go');if(!g||!g.disabled)location.reload()});
+  navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});
+}
 </script>
 <script src="plan.js"></script>
+<script src="journal.js?v=22"></script>
 </body>
 </html>

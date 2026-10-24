@@ -1,10 +1,10 @@
-/* Scalp Analyzer — cache v21 + chargement automatique du journal.
-   Ce SW injecte journal.js dans index.html pour éviter de modifier le fichier principal. */
-const C = 'scalp-v23';
-const F = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './plan.js', './journal.js', './journal-dashboard.html', './risque.js'];
+/* Scalp Analyzer — service worker v24 : réseau d'abord (les mises à jour s'appliquent seules), cache hors ligne en secours. */
+const C = 'scalp-v24';
+const F = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './plan.js', './journal.js', './journal-dashboard.html'];
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(C).then(cache => cache.addAll(F)));
+  // Un fichier manquant ne doit jamais empêcher l'installation (allSettled au lieu de addAll).
+  event.waitUntil(caches.open(C).then(cache => Promise.allSettled(F.map(u => cache.add(new Request(u, { cache: 'reload' }))))));
   self.skipWaiting();
 });
 
@@ -16,31 +16,22 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  const request = event.request;
-  if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
+  const request = event.request, url = new URL(request.url);
+  if (request.method !== 'GET' || url.origin !== self.location.origin) return;
 
-  // Tableau de bord : pas d'injection de journal.js, réseau d'abord.
-  if (/journal-dashboard\.html$/.test(new URL(request.url).pathname)) {
-    event.respondWith(fetch(request).catch(() => caches.match(request)));
-    return;
-  }
-
-  // Navigation : récupérer le vrai index et ajouter le script après plan.js.
-  if (request.mode === 'navigate' || /\/index\.html$/.test(new URL(request.url).pathname)) {
+  // Page principale : toujours la version du réseau ; journal.js est ajouté s'il n'est pas déjà dans index.html.
+  if ((request.mode === 'navigate' && !/journal-dashboard\.html$/.test(url.pathname)) || /\/index\.html$/.test(url.pathname)) {
     event.respondWith((async () => {
       try {
-        const response = await fetch(request);
+        const response = await fetch(request, { cache: 'no-cache' });
         if (!response.ok) return response;
         const html = await response.text();
-        if (html.includes('journal.js')) return new Response(html, { status: response.status, statusText: response.statusText, headers: response.headers });
-        const script = '<script src="./journal.js?v=20"></script>';
-        const injected = html.replace(/<\/body\s*>/i, script + '</body>');
-        if (injected === html) return response;
+        let out = html;
+        if (!html.includes('journal.js')) out = html.replace(/<\/body\s*>/i, '<script src="./journal.js?v=22"></script></body>');
         const headers = new Headers(response.headers);
-        headers.delete('content-length');
-        headers.delete('content-encoding');
+        headers.delete('content-length'); headers.delete('content-encoding');
         headers.set('content-type', 'text/html; charset=utf-8');
-        return new Response(injected, { status: response.status, statusText: response.statusText, headers });
+        return new Response(out, { status: response.status, statusText: response.statusText, headers });
       } catch (error) {
         const cached = await caches.match('./index.html');
         return cached || new Response('Scalp Analyzer est hors ligne. Reconnecte-toi pour charger la version à jour.', { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } });
@@ -49,5 +40,14 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  event.respondWith(caches.match(request).then(cached => cached || fetch(request)));
+  // Tout le reste : réseau d'abord (sans cache HTTP), puis copie en cache, secours hors ligne.
+  event.respondWith((async () => {
+    try {
+      const response = await fetch(request, { cache: 'no-cache' });
+      if (response.ok && response.type === 'basic') { const copy = response.clone(); caches.open(C).then(c => c.put(request, copy)).catch(() => {}); }
+      return response;
+    } catch (error) {
+      return (await caches.match(request, { ignoreSearch: true })) || Response.error();
+    }
+  })());
 });
