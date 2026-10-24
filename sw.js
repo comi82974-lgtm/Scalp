@@ -1,6 +1,6 @@
 /* Scalp Analyzer — service worker v24 : réseau d'abord (les mises à jour s'appliquent seules), cache hors ligne en secours. */
-const C = 'scalp-v24';
-const F = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './plan.js', './journal.js', './journal-dashboard.html'];
+const C = 'scalp-v25';
+const F = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './plan.js', './lot.js', './journal.js', './journal-dashboard.html'];
 
 self.addEventListener('install', event => {
   // Un fichier manquant ne doit jamais empêcher l'installation (allSettled au lieu de addAll).
