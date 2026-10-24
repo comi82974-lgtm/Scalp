@@ -1,7 +1,7 @@
 /* Scalp Analyzer — cache v21 + chargement automatique du journal.
    Ce SW injecte journal.js dans index.html pour éviter de modifier le fichier principal. */
-const C = 'scalp-v21';
-const F = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './plan.js', './journal.js'];
+const C = 'scalp-v22';
+const F = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './plan.js', './journal.js', './journal-dashboard.html'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(C).then(cache => cache.addAll(F)));
@@ -18,6 +18,12 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
+
+  // Tableau de bord : pas d'injection de journal.js, réseau d'abord.
+  if (/journal-dashboard\.html$/.test(new URL(request.url).pathname)) {
+    event.respondWith(fetch(request).catch(() => caches.match(request)));
+    return;
+  }
 
   // Navigation : récupérer le vrai index et ajouter le script après plan.js.
   if (request.mode === 'navigate' || /\/index\.html$/.test(new URL(request.url).pathname)) {
