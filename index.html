@@ -67,10 +67,6 @@ ul{padding-left:18px;margin:6px 0}
     <div><label for="asset">Actif (auto)</label><input id="asset" placeholder="auto"></div>
     <div><label for="price">Prix (auto)</label><input id="price" inputmode="decimal" placeholder="auto"></div>
   </div>
-  <label for="tdkey">Clé Twelve Data (optionnelle, pour des indicateurs exacts)</label>
-  <input id="tdkey" type="password" autocomplete="off" placeholder="clé de twelvedata.com">
-  <label for="sym">Symbole des données (seulement avec la clé Twelve Data)</label>
-  <input id="sym" placeholder="XAU/USD">
 </div>
 
 <div class="pan">
@@ -132,7 +128,7 @@ ul{padding-left:18px;margin:6px 0}
 <script>
 const $=id=>document.getElementById(id);
 const st={get(k,d){try{const v=localStorage.getItem(k);return v===null?d:v}catch(e){return d}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
-$('key').value=st.get('key','');$('model').value=st.get('model','gemini-3.8-flash');$('asset').value='';$('tdkey').value=st.get('tdkey','');$('sym').value=st.get('sym','XAU/USD');
+$('key').value=st.get('key','');$('model').value=st.get('model','gemini-3.8-flash');$('asset').value='';try{localStorage.removeItem('tdkey');localStorage.removeItem('sym')}catch(e){}
 const imgs={H1:null,M15:null,M5:null};
 
 const PROMPT=`Tu es un trader professionnel ICT/SMC et price action, spécialisé dans le scalping en M5.
@@ -179,7 +175,7 @@ RÉPONDS UNIQUEMENT EN JSON valide :
 "overlay":{"entry_y":0,"sl_y":0,"tp_y":0,"zones":[{"type":"OB","label":"OB","pmin":0,"pmax":0,"ymin":0,"xmin":0,"ymax":0,"xmax":0}]}}`;
 
 /* Emplacements de captures */
-function loadImg(file){return new Promise((ok,ko)=>{const r=new FileReader();r.onerror=ko;r.onload=()=>{const im=new Image();im.onerror=ko;im.onload=()=>{const s=Math.min(1,1600/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);c.getContext('2d').drawImage(im,0,0,c.width,c.height);ok(c)};im.src=r.result};r.readAsDataURL(file)})}
+function loadImg(file){return new Promise((ok,ko)=>{const r=new FileReader();r.onerror=ko;r.onload=()=>{const im=new Image();im.onerror=ko;im.onload=()=>{const s=Math.min(1,1400/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);c.getContext('2d').drawImage(im,0,0,c.width,c.height);ok(c)};im.src=r.result};r.readAsDataURL(file)})}
 ['H1','M15','M5'].forEach(tf=>{
   const d=document.createElement('label');d.className='slot';d.style.margin=0;
   d.innerHTML=`<span class="tag">${tf}</span><span><b>+</b>Ajouter</span><input type="file" accept="image/*">`;
@@ -191,87 +187,20 @@ function loadImg(file){return new Promise((ok,ko)=>{const r=new FileReader();r.o
   $('slots').appendChild(d);
 });
 
-/* Indicateurs */
-let real=null;
-const fmt=n=>(n==null||isNaN(n))?'n/d':(Math.abs(n)>=100?n.toFixed(2):n.toFixed(4));
-async function fetchSeries(sym,iv,key){
-  const u='https://api.twelvedata.com/time_series?symbol='+encodeURIComponent(sym)+'&interval='+iv+'&outputsize=250&order=asc&apikey='+encodeURIComponent(key);
-  const r=await fetch(u),j=await r.json();
-  if(j.status==='error'||!j.values)throw new Error(j.message||('pas de données '+sym+' '+iv));
-  return j.values.map(v=>({t:v.datetime,o:+v.open,h:+v.high,l:+v.low,c:+v.close,v:+v.volume||0}));
-}
-function ema(a,p){const k=2/(p+1);let e=a.slice(0,p).reduce((x,y)=>x+y,0)/p;const o=Array(p-1).fill(null);o.push(e);for(let i=p;i<a.length;i++){e=a[i]*k+e*(1-k);o.push(e)}return o}
-function rsi(c,p=14){let g=0,l=0;for(let i=1;i<=p;i++){const d=c[i]-c[i-1];d>=0?g+=d:l-=d}g/=p;l/=p;for(let i=p+1;i<c.length;i++){const d=c[i]-c[i-1];g=(g*(p-1)+Math.max(d,0))/p;l=(l*(p-1)+Math.max(-d,0))/p}return l===0?100:100-100/(1+g/l)}
-function trArr(b){return b.map((x,i)=>i?Math.max(x.h-x.l,Math.abs(x.h-b[i-1].c),Math.abs(x.l-b[i-1].c)):x.h-x.l)}
-function atr(b,p=14){const t=trArr(b);let a=t.slice(1,p+1).reduce((x,y)=>x+y,0)/p;for(let i=p+1;i<t.length;i++)a=(a*(p-1)+t[i])/p;return a}
-function macd(c){const e1=ema(c,12),e2=ema(c,26),m=[];for(let i=0;i<c.length;i++)if(e1[i]!=null&&e2[i]!=null)m.push(e1[i]-e2[i]);const s=ema(m,9),L=m.length-1;return{m:m[L],s:s[L],h:m[L]-s[L]}}
-function stoch(b){const raw=[];for(let i=13;i<b.length;i++){const w=b.slice(i-13,i+1),hh=Math.max(...w.map(x=>x.h)),ll=Math.min(...w.map(x=>x.l));raw.push(hh===ll?50:100*(b[i].c-ll)/(hh-ll))}const k=[];for(let i=2;i<raw.length;i++)k.push((raw[i]+raw[i-1]+raw[i-2])/3);const n=k.length-1;return{k:k[n],d:(k[n]+k[n-1]+k[n-2])/3}}
-function adx(b,p=14){
-  const tr=[],pd=[],md=[];
-  for(let i=1;i<b.length;i++){const up=b[i].h-b[i-1].h,dn=b[i-1].l-b[i].l;pd.push(up>dn&&up>0?up:0);md.push(dn>up&&dn>0?dn:0);tr.push(Math.max(b[i].h-b[i].l,Math.abs(b[i].h-b[i-1].c),Math.abs(b[i].l-b[i-1].c)))}
-  const sm=a=>a.slice(0,p).reduce((x,y)=>x+y,0);
-  let T=sm(tr),P=sm(pd),M=sm(md),pi=0,mi=0;const dx=[];
-  for(let i=p-1;i<tr.length;i++){
-    if(i>p-1){T=T-T/p+tr[i];P=P-P/p+pd[i];M=M-M/p+md[i]}
-    pi=100*P/T;mi=100*M/T;dx.push(100*Math.abs(pi-mi)/((pi+mi)||1));
-  }
-  let a=dx.slice(0,p).reduce((x,y)=>x+y,0)/p;
-  for(let i=p;i<dx.length;i++)a=(a*(p-1)+dx[i])/p;
-  return{adx:a,pi,mi};
-}
-function hl(b,i,p){const w=b.slice(i-p+1,i+1);return(Math.max(...w.map(x=>x.h))+Math.min(...w.map(x=>x.l)))/2}
-function ichi(b){const n=b.length,i=n-27,a=(hl(b,i,9)+hl(b,i,26))/2,bb=hl(b,i,52);return{top:Math.max(a,bb),bot:Math.min(a,bb)}}
-function calc(b){
-  if(b.length<80)throw new Error('pas assez de bougies');
-  const c=b.map(x=>x.c),L=c.length-1,p=c[L];
-  const e50=ema(c,50)[L],e200=b.length>=200?ema(c,200)[L]:null;
-  const R=rsi(c),M=macd(c),S=stoch(b),A=adx(b),I=ichi(b),AT=atr(b);
-  const w=c.slice(-20),sma=w.reduce((x,y)=>x+y,0)/20,sd=Math.sqrt(w.reduce((x,y)=>x+(y-sma)**2,0)/20);
-  const pb=sd?(p-(sma-2*sd))/(4*sd):0.5;
-  const t=trArr(b.slice(-100)),atrAvg=t.reduce((x,y)=>x+y,0)/t.length;
-  const vols=b.map(x=>x.v),vOk=vols.slice(-20).some(v=>v>0);
-  const vr=vOk?(vols.slice(-5).reduce((x,y)=>x+y,0)/5)/((vols.slice(-25,-5).reduce((x,y)=>x+y,0)/20)||1):null;
-  const ref=e200!=null?e200:e50;
-  const trend=e200!=null?(p>e50&&e50>e200?1:p<e50&&e50<e200?-1:0):(p>e50?1:p<e50?-1:0);
-  return{p,e50,e200,R,M,S,A,I,AT,pb,atrRatio:AT/atrAvg,vr,trend};
-}
-function rows(r){
-  const B='bull',D='bear',N='neutral',o=[];
-  o.push({nom:'RSI (14)',valeur:r.R.toFixed(0),etat:r.R>70?'Suracheté':r.R<30?'Survendu':r.R>=50?'Haussier':'Baissier',sens:r.R>70?D:r.R<30?B:r.R>=50?B:D});
-  o.push({nom:'MACD',valeur:'',etat:r.M.h>0?'Haussier':'Baissier',sens:r.M.h>0?B:D});
-  o.push({nom:'Volume',valeur:'',etat:r.vr==null?'n/d':r.vr>1.2?'Élevé':r.vr<0.8?'Faible':'Normal',sens:N});
-  o.push({nom:'Tendance',valeur:'',etat:r.trend>0?'Haussier':r.trend<0?'Baissier':'Neutre',sens:r.trend>0?B:r.trend<0?D:N});
-  o.push({nom:'EMA 50/200',valeur:'',etat:r.e200==null?'n/d':r.e50>r.e200?'50 au-dessus de 200':'50 sous 200',sens:r.e200==null?N:r.e50>r.e200?B:D});
-  o.push({nom:'Bollinger',valeur:'',etat:r.pb<0.2?'Bas de bande':r.pb>0.8?'Haut de bande':'Milieu',sens:r.pb<0.2?B:r.pb>0.8?D:N});
-  o.push({nom:'Stochastique',valeur:r.S.k.toFixed(0),etat:r.S.k<20?'Survendu':r.S.k>80?'Suracheté':r.S.k>r.S.d?'Haussier':'Baissier',sens:r.S.k<20?B:r.S.k>80?D:r.S.k>r.S.d?B:D});
-  o.push({nom:'ADX',valeur:r.A.adx.toFixed(0),etat:r.A.adx>=25?'Forte tendance':r.A.adx>=20?'Tendance modérée':'Range',sens:r.A.adx>=20?(r.A.pi>r.A.mi?B:D):N});
-  o.push({nom:'Ichimoku',valeur:'',etat:r.p>r.I.top?'Au-dessus du nuage':r.p<r.I.bot?'Sous le nuage':'Dans le nuage',sens:r.p>r.I.top?B:r.p<r.I.bot?D:N});
-  o.push({nom:'ATR (14)',valeur:fmt(r.AT),etat:r.atrRatio>1.3?'Vol. haute':r.atrRatio<0.7?'Vol. basse':'Vol. normale',sens:N});
-  return o;
-}
-function sumLine(tf,r){
-  const T=r.trend>0?'haussière':r.trend<0?'baissière':'neutre';
-  return tf+' : prix '+fmt(r.p)+' | tendance '+T+' | EMA50 '+fmt(r.e50)+' | EMA200 '+fmt(r.e200)+' | RSI '+r.R.toFixed(0)+' | MACD hist '+fmt(r.M.h)+' | Stoch K '+r.S.k.toFixed(0)+' | ADX '+r.A.adx.toFixed(0)+' (+DI '+r.A.pi.toFixed(0)+', -DI '+r.A.mi.toFixed(0)+') | ATR '+fmt(r.AT)+' | %B Bollinger '+r.pb.toFixed(2)+' | nuage Ichimoku '+fmt(r.I.bot)+' à '+fmt(r.I.top);
-}
-function buildData(m5,r){
-  const rows40=m5.slice(-40).map(x=>x.t.slice(5,16)+' '+fmt(x.o)+' '+fmt(x.h)+' '+fmt(x.l)+' '+fmt(x.c)).join('\n');
-  return '\n\nDONNÉES DE MARCHÉ RÉELLES pour le symbole '+$('sym').value.trim()+' (calculées, exactes : elles priment sur ta lecture visuelle ; si l\'actif des captures est différent, ignore-les) :\n'+sumLine('H1',r.h1)+'\n'+sumLine('M15',r.m15)+'\n'+sumLine('M5',r.m5)+'\nDernières bougies M5 (date heure, ouverture haut bas clôture) :\n'+rows40+'\n\nConsigne : entrée, SL et TP doivent être cohérents avec ces prix réels et avec l\'ATR M5 (SL typique de 1 à 2 ATR). Mets "indicateurs":[] dans le JSON car l\'app les calcule elle-même.';
-}
-
+/* Les indicateurs restent estimés par Gemini à partir des captures. Twelve Data retiré : aucun appel externe de données de marché. */
 /* Détection automatique de l'actif : Gemini lit le nom sur la capture M5 (appel court) */
 async function detectAsset(key){
-  const body=JSON.stringify({contents:[{parts:[{text:'Lis sur cette capture de graphique le nom de l\'actif (ex. XAUUSD, US30, EURUSD, BTCUSD), en général en haut à gauche. Réponds UNIQUEMENT en JSON : {"actif":""}. Laisse vide si illisible.'},{inline_data:{mime_type:'image/jpeg',data:imgs.M5.toDataURL('image/jpeg',.7).split(',')[1]}}]}],generationConfig:{responseMimeType:'application/json',temperature:0}});
-  const ms=[$('model').value.trim(),'gemini-3.8-flash','gemini-3.7-flash','gemini-3.5-flash'].filter((m,i,a)=>m&&a.indexOf(m)===i);
-  for(const m of ms){
-    try{
-      const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(m)+':generateContent?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body});
-      if(!r.ok)continue;
-      const x=await r.json();
-      const t=x.candidates[0].content.parts.map(p=>p.text||'').join('').replace(/```json|```/g,'').trim();
-      return String(JSON.parse(t).actif||'').trim();
-    }catch(e){}
-  }
-  return '';
+  // Appel court unique : on évite de tester plusieurs modèles pour lire le symbole.
+  const model=$('model').value.trim()||'gemini-3.8-flash';
+  const body=JSON.stringify({contents:[{parts:[{text:'Lis le nom de l’actif sur cette capture M5, généralement en haut à gauche. Réponds uniquement en JSON : {"actif":"XAUUSD"}. Si illisible, laisse vide.'},{inline_data:{mime_type:'image/jpeg',data:imgs.M5.toDataURL('image/jpeg',.68).split(',')[1]}}]}],generationConfig:{responseMimeType:'application/json',temperature:0}});
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),8000);
+  try{
+    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body,signal:controller.signal});
+    if(!r.ok)return '';
+    const x=await r.json();
+    const t=(x.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').replace(/```json|```/g,'').trim();
+    return String(JSON.parse(t).actif||'').trim();
+  }catch(e){return ''}finally{clearTimeout(timer)}
 }
 
 /* Analyse */
@@ -282,59 +211,49 @@ $('go').onclick=async()=>{
   const key=$('key').value.trim();
   if(!key){$('err').textContent='Entre ta clé API Gemini.';return}
   if(!imgs.M5){$('err').textContent='Ajoute au moins la capture M5.';return}
-  const tdk=$('tdkey').value.trim();let sym=$('sym').value.trim();
-  st.set('key',key);st.set('model',$('model').value.trim());st.set('tdkey',tdk);st.set('sym',sym);
+  st.set('key',key);st.set('model',$('model').value.trim());
   $('go').disabled=true;$('go').textContent='Analyse en cours...';
   let wl=null;try{wl=await navigator.wakeLock.request('screen')}catch(e){}
   const t0=Date.now(),tick=setInterval(()=>{if($('go').textContent.indexOf('Analyse')===0)$('go').textContent='Analyse en cours... '+Math.round((Date.now()-t0)/1000)+' s'},1000);
-  real=null;let extra='',warn='',planSym=sym;
+  let extra='',warn='',planSym='';
   try{
     // Actif choisi automatiquement : champ « Actif » s'il est rempli, sinon lu par Gemini sur la capture M5
     try{
       const txt=$('asset').value.trim()||await detectAsset(key);
       const rs=txt&&window.ScalpPlan&&ScalpPlan.resolveSymbol?ScalpPlan.resolveSymbol(txt):'';
-      if(rs){planSym=rs;$('sym').value=rs;sym=rs;st.set('sym',rs);const hp=await ScalpPlan.hasPlan(rs);$('asset').placeholder='auto · '+rs+(hp?' · plan hebdo ✓':' · sans plan hebdo')}
+      if(rs){planSym=rs;const hp=await ScalpPlan.hasPlan(rs);$('asset').placeholder='auto · '+rs+(hp?' · plan hebdo ✓':' · sans plan hebdo')}
       else{planSym='';$('asset').placeholder='auto · '+(txt||'actif non lu')+' (non reconnu)'}
     }catch(e){}
-    if(tdk&&sym){
-      try{
-        const [m5,m15,h1]=await Promise.all([fetchSeries(sym,'5min',tdk),fetchSeries(sym,'15min',tdk),fetchSeries(sym,'1h',tdk)]);
-        real={m5:calc(m5),m15:calc(m15),h1:calc(h1)};
-        $('price').value=fmt(m5[m5.length-1].c);$('price').dataset.auto='1';
-        extra=buildData(m5,real);
-      }catch(e){warn='Données de marché indisponibles ('+e.message+'). Indicateurs estimés par Gemini.'}
-    }
     const assetIn=$('asset').value.trim(),asset=assetIn||"non fourni : lis le nom de l'actif sur la capture (en haut à gauche du graphique)",price=$('price').value.trim()||"non fourni : lis-le sur la capture M5 (étiquette de prix de la dernière bougie, sur l'échelle de droite)";
     try{if(window.ScalpPlan&&ScalpPlan.contextText)extra+=await ScalpPlan.contextText(planSym)}catch(e){}
     const parts=[{text:PROMPT.replace('{ASSET}',asset).replace('{PRICE}',price)+extra}];
-    for(const tf of ['H1','M15','M5']) if(imgs[tf]) parts.push({text:'Capture '+tf+' :'},{inline_data:{mime_type:'image/jpeg',data:imgs[tf].toDataURL('image/jpeg',.88).split(',')[1]}});
+    for(const tf of ['H1','M15','M5']) if(imgs[tf]) parts.push({text:'Capture '+tf+' :'},{inline_data:{mime_type:'image/jpeg',data:imgs[tf].toDataURL('image/jpeg',.82).split(',')[1]}});
     let think=true;
     const mk=()=>JSON.stringify({contents:[{parts}],generationConfig:Object.assign({responseMimeType:'application/json',temperature:.3},think?{thinkingConfig:{thinkingLevel:'low'}}:{})});
-    const first=$('model').value.trim();
-    const models=[first].concat(['gemini-3.8-flash','gemini-3.7-flash','gemini-3.5-flash'].filter(m=>m!==first));
+    const first=$('model').value.trim()||'gemini-3.8-flash';
+    const models=[first, ...(['gemini-3.8-flash','gemini-3.7-flash','gemini-3.5-flash'].filter(m=>m!==first).slice(0,1))];
     let j=null,last='';
+    // Maximum : deux appels d'analyse, chacun plafonné à 60 s. Les critères de trading restent inchangés.
     for(let mi=0;mi<models.length&&!j;mi++){
-      for(let t=0;t<2&&!j;t++){
-        if(mi||t)$('go').textContent='Gemini surchargé, nouvel essai...';
-        try{
-          const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(models[mi])+':generateContent?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:mk()});
-          const x=await r.json();
-          if(r.ok){j=x;break}
-          last=(x.error&&x.error.message)||('Erreur '+r.status);
-          if(r.status===400&&think&&/thinking/i.test(last)){think=false;t--;continue}
-          if(r.status===404)break;
-          if(![429,500,503,504].includes(r.status))throw new Error(last);
-        }catch(e){
-          if(e instanceof TypeError)last='Connexion interrompue : reste sur l\'app pendant l\'analyse';
-          else throw e;
+      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),60000);
+      try{
+        if(mi)$('go').textContent='Nouvel essai avec le modèle de secours...';
+        const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(models[mi])+':generateContent?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:mk(),signal:controller.signal});
+        const x=await r.json();
+        if(r.ok){j=x;break}
+        last=(x.error&&x.error.message)||('Erreur '+r.status);
+        if(r.status===400&&think&&/thinking/i.test(last)){
+          // Certains modèles n'acceptent pas thinkingLevel : on retente une fois sans ce paramètre.
+          think=false;
+          if(mi===0){const retryController=new AbortController(),retryTimer=setTimeout(()=>retryController.abort(),60000);try{const rr=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(models[mi])+':generateContent?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:mk(),signal:retryController.signal});const xx=await rr.json();if(rr.ok){j=xx;break}last=(xx.error&&xx.error.message)||('Erreur '+rr.status)}finally{clearTimeout(retryTimer)}}
         }
-        await new Promise(z=>setTimeout(z,2500));
-      }
+        if(![429,500,503,504].includes(r.status)&&!(r.status===400&&/thinking/i.test(last)))throw new Error(last);
+      }catch(e){last=e.name==='AbortError'?'Délai dépassé après 60 secondes. Réessaie avec une connexion stable.':(e instanceof TypeError?'Connexion interrompue : vérifie la connexion internet':e.message||String(e));}
+      finally{clearTimeout(timer)}
     }
     if(!j)throw new Error(last);
     const txt=j.candidates[0].content.parts.map(p=>p.text||'').join('').replace(/```json|```/g,'').trim();
     const d=JSON.parse(txt);
-    if(real&&d.actif_lu){const n=x=>String(x).toUpperCase().replace(/[^A-Z0-9]/g,'');const a=n(d.actif_lu),b=n(sym).slice(0,6),rs=(window.ScalpPlan&&ScalpPlan.resolveSymbol)?ScalpPlan.resolveSymbol(d.actif_lu):'';if(rs?rs!==sym:(b&&!a.includes(b))){real=null;warn='Les données Twelve Data ('+sym+') ne correspondent pas à l\'actif des captures ('+d.actif_lu+') : indicateurs estimés par Gemini.'}}
     show(d);save(d,assetIn||d.actif_lu||'?');
     if(warn)$('err').textContent=warn;
   }catch(e){$('err').textContent='Échec : '+e.message}
@@ -410,9 +329,9 @@ function show(d){
   $('conf').innerHTML='';(d.confluences||[]).forEach(x=>{const li=document.createElement('li');li.textContent=x;$('conf').appendChild(li)});
   $('att').textContent=d.attente?('À surveiller : '+d.attente):'';
   $('inv').textContent=d.invalidation?'Invalidation : '+d.invalidation:'';
-  const ind=real?rows(real.m5):(Array.isArray(d.indicateurs)?d.indicateurs:[]);
+  const ind=Array.isArray(d.indicateurs)?d.indicateurs:[];
   const bias=x=>x.trend>0?'haussier':x.trend<0?'baissier':'neutre';
-  $('indnote').textContent=real?('Indicateurs M5 calculés sur données de marché réelles. Biais M15 : '+bias(real.m15)+', H1 : '+bias(real.h1)+'.'):'Valeurs estimées visuellement par Gemini à partir des bougies. Ce sont des approximations, pas des calculs exacts.';
+  $('indnote').textContent='Valeurs estimées visuellement par Gemini à partir des bougies. Ce sont des approximations, pas des calculs exacts.';
   $('ind').classList.toggle('hide',!ind.length);$('il').innerHTML='';
   ind.forEach(i=>{const r=document.createElement('div');r.className='ir';const a=document.createElement('span');a.textContent=(i.nom||'')+(i.valeur&&i.valeur!=='?'?' '+i.valeur:'');const b=document.createElement('span');b.className='pill '+({bull:'bull',bear:'bear'}[i.sens]||'neu');b.textContent=i.etat||'';r.append(a,b);$('il').appendChild(r)});
   $('pat').textContent=d.pattern?'Pattern détecté : '+d.pattern:'';

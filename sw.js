@@ -1,5 +1,5 @@
-/* Scalp Analyzer — service worker v24 : réseau d'abord (les mises à jour s'appliquent seules), cache hors ligne en secours. */
-const C = 'scalp-v25';
+/* Scalp Analyzer — service worker v26 : réseau d'abord (les mises à jour s'appliquent seules), cache hors ligne en secours. */
+const C = 'scalp-v26';
 const F = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './plan.js', './lot.js', './journal.js', './journal-dashboard.html'];
 
 self.addEventListener('install', event => {
@@ -27,7 +27,7 @@ self.addEventListener('fetch', event => {
         if (!response.ok) return response;
         const html = await response.text();
         let out = html;
-        if (!html.includes('journal.js')) out = html.replace(/<\/body\s*>/i, '<script src="./journal.js?v=22"></script></body>');
+        if (!html.includes('journal.js')) out = html.replace(/<\/body\s*>/i, '<script src="./journal.js?v=23"></script></body>');
         const headers = new Headers(response.headers);
         headers.delete('content-length'); headers.delete('content-encoding');
         headers.set('content-type', 'text/html; charset=utf-8');
