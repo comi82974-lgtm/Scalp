@@ -231,27 +231,45 @@ $('go').onclick=async()=>{
     let think=true;
     const mk=()=>JSON.stringify({contents:[{parts}],generationConfig:Object.assign({responseMimeType:'application/json',temperature:.3},think?{thinkingConfig:{thinkingLevel:'low'}}:{})});
     const first=$('model').value.trim()||'gemini-3.8-flash';
-    const models=[first, ...(['gemini-3.8-flash','gemini-3.7-flash','gemini-3.5-flash'].filter(m=>m!==first).slice(0,1))];
-    let j=null,last='';
-    // Maximum : deux appels d'analyse, chacun plafonné à 60 s. Les critères de trading restent inchangés.
+    // Secours automatiques : le quota est propre à chaque modèle. On garde le même prompt et les mêmes images.
+    // Modèles vérifiés dans la documentation Gemini API actuelle.
+    const models=[...new Set([first,'gemini-3.8-flash','gemini-3.7-flash','gemini-3.6-flash'])];
+    let j=null,last='',lastStatus=0,quotaSeen=false;
     for(let mi=0;mi<models.length&&!j;mi++){
       const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),60000);
       try{
-        if(mi)$('go').textContent='Nouvel essai avec le modèle de secours...';
+        if(mi)$('go').textContent='Quota ou indisponibilité : essai du modèle de secours '+models[mi]+'...';
         const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(models[mi])+':generateContent?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:mk(),signal:controller.signal});
         const x=await r.json();
         if(r.ok){j=x;break}
+        lastStatus=r.status;
         last=(x.error&&x.error.message)||('Erreur '+r.status);
+        if(r.status===429||/quota|resource_exhausted|rate.?limit/i.test(last))quotaSeen=true;
         if(r.status===400&&think&&/thinking/i.test(last)){
-          // Certains modèles n'acceptent pas thinkingLevel : on retente une fois sans ce paramètre.
+          // Si le modèle ne reconnaît pas thinkingLevel, on retente ce même modèle une seule fois sans ce paramètre.
           think=false;
-          if(mi===0){const retryController=new AbortController(),retryTimer=setTimeout(()=>retryController.abort(),60000);try{const rr=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(models[mi])+':generateContent?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:mk(),signal:retryController.signal});const xx=await rr.json();if(rr.ok){j=xx;break}last=(xx.error&&xx.error.message)||('Erreur '+rr.status)}finally{clearTimeout(retryTimer)}}
+          const retryController=new AbortController(),retryTimer=setTimeout(()=>retryController.abort(),60000);
+          try{
+            const rr=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(models[mi])+':generateContent?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:mk(),signal:retryController.signal});
+            const xx=await rr.json();
+            if(rr.ok){j=xx;break}
+            lastStatus=rr.status;last=(xx.error&&xx.error.message)||('Erreur '+rr.status);
+            if(rr.status===429||/quota|resource_exhausted|rate.?limit/i.test(last))quotaSeen=true;
+          }finally{clearTimeout(retryTimer)}
         }
-        if(![429,500,503,504].includes(r.status)&&!(r.status===400&&/thinking/i.test(last)))throw new Error(last);
+        // Passe au modèle suivant sur quota, modèle non disponible ou erreur temporaire.
+        if(![400,404,408,429,500,502,503,504].includes(r.status)&&!(r.status===400&&/thinking/i.test(last)))break;
       }catch(e){last=e.name==='AbortError'?'Délai dépassé après 60 secondes. Réessaie avec une connexion stable.':(e instanceof TypeError?'Connexion interrompue : vérifie la connexion internet':e.message||String(e));}
       finally{clearTimeout(timer)}
     }
-    if(!j)throw new Error(last);
+    if(!j){
+      if(quotaSeen){
+        throw new Error('Quota Gemini atteint ou indisponible sur les modèles de secours. Aucun modèle n’a pu répondre. Vérifie les quotas de ton projet sur https://ai.dev/rate-limit puis réessaie lorsque le quota est rétabli.');
+      }
+      if(lastStatus===400||lastStatus===401||lastStatus===403)throw new Error('La clé API Gemini ou les autorisations du projet semblent invalides. Vérifie ta clé dans Google AI Studio.');
+      if(lastStatus===404)throw new Error('Le modèle demandé et les modèles de secours ne sont pas disponibles pour cette clé API. Vérifie les modèles accessibles dans Google AI Studio.');
+      throw new Error(last||'Échec de l’analyse Gemini. Vérifie ta connexion et réessaie.');
+    }
     const txt=j.candidates[0].content.parts.map(p=>p.text||'').join('').replace(/```json|```/g,'').trim();
     const d=JSON.parse(txt);
     show(d);save(d,assetIn||d.actif_lu||'?');

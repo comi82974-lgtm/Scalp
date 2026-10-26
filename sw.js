@@ -1,5 +1,5 @@
-/* Scalp Analyzer — service worker v26 : réseau d'abord (les mises à jour s'appliquent seules), cache hors ligne en secours. */
-const C = 'scalp-v26';
+/* Scalp Analyzer — service worker v27 : réseau d'abord (les mises à jour s'appliquent seules), cache hors ligne en secours. */
+const C = 'scalp-v28';
 const F = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './plan.js', './lot.js', './journal.js', './journal-dashboard.html'];
 
 self.addEventListener('install', event => {
