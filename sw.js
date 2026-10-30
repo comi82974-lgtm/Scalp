@@ -1,24 +1,20 @@
-/* Scalp Analyzer — service worker v30.
-   Ajout indépendant du module communautaire ; moteur d'analyse inchangé. */
-const C = 'scalp-v30';
-const F = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './plan.js', './lot.js', './journal.js', './journal-dashboard.html', './community.js'];
-
+/* Scalp Analyzer — service worker v31.
+   Habillage graphique chargé séparément ; aucune logique applicative modifiée. */
+const C = 'scalp-v31';
+const F = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './plan.js', './lot.js', './journal.js', './journal-dashboard.html', './community.js', './theme.css'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(C).then(cache => Promise.allSettled(F.map(u => cache.add(new Request(u, { cache: 'reload' }))))));
   self.skipWaiting();
 });
-
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys => Promise.all(keys.filter(key => key !== C).map(key => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });
-
 self.addEventListener('fetch', event => {
   const request = event.request, url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin) return;
-
   if ((request.mode === 'navigate' && !/journal-dashboard\.html$/.test(url.pathname)) || /\/index\.html$/.test(url.pathname)) {
     event.respondWith((async () => {
       try {
@@ -26,6 +22,7 @@ self.addEventListener('fetch', event => {
         if (!response.ok) return response;
         const html = await response.text();
         let out = html;
+        if (!out.includes('theme.css')) out = out.replace(/<\/head\s*>/i, '<link rel="stylesheet" href="./theme.css?v=1"></head>');
         if (!out.includes('journal.js')) out = out.replace(/<\/body\s*>/i, '<script src="./journal.js?v=23"></script></body>');
         if (!out.includes('community.js')) out = out.replace(/<\/body\s*>/i, '<script src="./community.js?v=2"></script></body>');
         const headers = new Headers(response.headers);
@@ -39,7 +36,6 @@ self.addEventListener('fetch', event => {
     })());
     return;
   }
-
   event.respondWith((async () => {
     try {
       const response = await fetch(request, { cache: 'no-cache' });
