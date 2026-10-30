@@ -21,7 +21,7 @@
   const NICK_RE = /^[\p{L}\p{N}_ -]{3,24}$/u;
 
   let NT = null, aesKey = null, tag = '', sockets = [], items = new Map();
-  let active = false, mode = 'chat', booted = false, retry = null;
+  let active = false, mode = 'chat', booted = false, retry = null, prefill = null;
   const KEEP_DAYS = 14, KEEP_MAX = 500;
   let cache = new Map(), saveTimer = null;
   const cacheKey = () => 'scalp_community_cache_v1_' + tag;
@@ -139,6 +139,53 @@
     $('#tabCommunity')?.classList.remove('on');
     $('#viewA').style.display = ''; $('#viewP').style.display = '';
   }
+  // ---------- Partage d'une analyse déjà faite (lit l'écran de résultat, ne modifie rien) ----------
+  const txt = id => (document.getElementById(id)?.textContent || '').trim();
+  const shown = id => { const el = document.getElementById(id); return !!el && !el.classList.contains('hide'); };
+  function buildShare() {
+    const assetIn = (document.getElementById('asset')?.value || '').trim();
+    const read = (txt('pl').match(/capture M5 : (\S+)/) || [])[1] || '';
+    const asset = (assetIn || read || 'ACTIF').toUpperCase().slice(0, 30);
+    const cls = document.getElementById('vd')?.className || '';
+    const direction = /\bBUY\b/.test(cls) ? 'BUY' : /\bSELL\b/.test(cls) ? 'SELL' : 'ATTENTE';
+    const lines = [];
+    lines.push([txt('vd'), txt('cf')].filter(Boolean).join(' · '));
+    const e = txt('e'), sl = txt('s'), tp = txt('t'), rr = txt('rr');
+    if (e && e !== '-') lines.push(`Entrée ${e} · SL ${sl} · TP ${tp} · RR ${rr}`);
+    if (shown('val') && txt('val')) lines.push(txt('val'));
+    if (txt('why')) lines.push(txt('why'));
+    const conf = [...document.querySelectorAll('#conf li')].map(li => li.textContent.trim()).filter(Boolean);
+    if (conf.length) lines.push('Confluences : ' + conf.join(' ; '));
+    if (txt('att')) lines.push(txt('att'));
+    if (txt('inv')) lines.push(txt('inv'));
+    if (shown('pb')) lines.push(`Setup conditionnel : ${txt('pbc')} Entrée ${txt('pbe')} · SL ${txt('pbs')} · TP ${txt('pbt')} · RR ${txt('pbr')}`);
+    if (shown('sc')) lines.push(`Scénario : ${txt('sct')} — ${txt('scd')}`);
+    let body = lines.filter(Boolean).join('\n');
+    if (body.length > 2000) body = body.slice(0, 1997) + '…';
+    return { asset, direction, timeframe: 'M5', body };
+  }
+  function applyPrefill() {
+    if (!prefill || $('#cmMain')?.classList.contains('cm-hidden')) return;
+    $('#cmAsset').value = prefill.asset; $('#cmDirection').value = prefill.direction;
+    $('#cmTimeframe').value = prefill.timeframe; $('#cmAnalysisText').value = prefill.body;
+    prefill = null; setMode('analysis');
+    status('Analyse prête : relis-la, modifie-la si tu veux, puis touche « Publier l’analyse ».');
+  }
+  function injectShareButton() {
+    if (document.getElementById('cmShare')) return;
+    const anchor = document.getElementById('dl') || document.getElementById('res');
+    if (!anchor) return;
+    const b = document.createElement('button');
+    b.id = 'cmShare'; b.type = 'button'; b.className = 'sec'; b.textContent = 'Partager dans la communauté';
+    b.style.marginTop = '8px';
+    if (anchor.id === 'dl') anchor.after(b); else anchor.appendChild(b);
+    b.addEventListener('click', () => {
+      prefill = buildShare();
+      openCommunity(); applyPrefill();
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) {}
+    });
+  }
+
   function setMode(m) {
     mode = m;
     show('cmChat', m === 'chat'); show('cmAnalyses', m === 'analysis');
@@ -223,14 +270,14 @@
     }
     show('cmSetup', false); show('cmMain', true);
     $('#cmWho').textContent = 'Connecté sous ' + c.nick;
-    if (booted) { setMode(mode); return; }
+    if (booted) { setMode(mode); applyPrefill(); return; }
     try {
       status('Connexion…');
       await loadLib();
       if (!c.sk) { c.sk = toHex(NT.generateSecretKey()); saveCfg(c); }
       aesKey = await deriveKey(c.room);
       tag = (await sha256hex('scalp-room:' + c.room)).slice(0, 32);
-      booted = true; items.clear(); cache.clear(); await loadCache(); setMode(mode); connect();
+      booted = true; items.clear(); cache.clear(); await loadCache(); setMode(mode); connect(); applyPrefill();
     } catch (e) { status('Connexion impossible : ' + (e.message || 'erreur') , true); }
   }
 
@@ -287,6 +334,6 @@
     }
   }
 
-  function init() { ensureUI(); }
+  function init() { ensureUI(); injectShareButton(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true }); else init();
 })();
