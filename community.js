@@ -76,7 +76,7 @@
       const pane = document.createElement('section');
       pane.id = 'viewCommunity';
       pane.innerHTML = `
-        <div class="cm-head"><div><div class="cm-title">Communauté</div><div class="cm-muted">Échanges entre traders · salon privé</div></div><button class="cm-btn" id="cmProfileBtn">Profil</button></div>
+        <div class="cm-head"><div><div class="cm-title">Communauté</div><div class="cm-muted">Échanges entre traders · salon privé</div></div><div class="cm-row"><button class="cm-btn" id="cmRoomBtn">Salon</button><button class="cm-btn" id="cmProfileBtn">Profil</button></div></div>
         <div id="cmSetup" class="cm-card cm-hidden">
           <b>Rejoindre le salon</b>
           <p class="cm-muted">À faire une seule fois. Tous les amis saisissent le même code de salon.</p>
@@ -108,6 +108,7 @@
       $('#viewP').after(pane);
       $('#cmJoin').addEventListener('click', join);
       $('#cmProfileBtn').addEventListener('click', editProfile);
+      $('#cmRoomBtn').addEventListener('click', changeRoom);
       $('#cmRefresh').addEventListener('click', () => connect(true));
       $('#cmChatTab').addEventListener('click', () => setMode('chat'));
       $('#cmAnalysisTab').addEventListener('click', () => setMode('analysis'));
@@ -269,7 +270,7 @@
       status('Saisis le code du salon et ton pseudonyme.'); return;
     }
     show('cmSetup', false); show('cmMain', true);
-    $('#cmWho').textContent = 'Connecté sous ' + c.nick;
+    $('#cmWho').textContent = who(c);
     if (booted) { setMode(mode); applyPrefill(); return; }
     try {
       status('Connexion…');
@@ -290,13 +291,28 @@
     if (roomChanged) { sockets.forEach(s => { try { s.onclose = null; s.close(); } catch (_) {} }); sockets = []; booted = false; items.clear(); cache.clear(); }
     await boot();
   }
+  const who = c => 'Connecté sous ' + c.nick + ' · salon « ' + c.room + ' »';
+  async function changeRoom() {
+    const c = readCfg();
+    const room = prompt('Code du nouveau salon (6 caractères min.).\nSalon actuel : ' + (c.room || ''), '');
+    if (room === null) return;
+    const v = room.trim();
+    if (v.length < 6) return status('Le code du salon doit faire 6 caractères minimum.', true);
+    if (v === c.room) return status('Tu es déjà dans ce salon.');
+    c.room = v; saveCfg(c);
+    clearTimeout(retry); clearTimeout(saveTimer);
+    sockets.forEach(s => { try { s.onclose = null; s.close(); } catch (_) {} });
+    sockets = []; booted = false; items.clear(); cache.clear();
+    await boot();
+    status('Tu es maintenant dans le salon « ' + v + ' ».');
+  }
   function editProfile() {
     const c = readCfg();
     const nick = prompt('Nouveau pseudonyme (3 à 24 caractères)', c.nick || '');
     if (nick === null) return;
     const v = nick.trim();
     if (!NICK_RE.test(v)) return status('Pseudonyme invalide.', true);
-    c.nick = v; saveCfg(c); $('#cmWho').textContent = 'Connecté sous ' + v; status('Pseudonyme modifié.');
+    c.nick = v; saveCfg(c); $('#cmWho').textContent = who(c); status('Pseudonyme modifié.');
   }
 
   // ---------- Envoi ----------
