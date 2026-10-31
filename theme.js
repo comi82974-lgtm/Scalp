@@ -4,7 +4,7 @@
   'use strict';
   if (window.__SCALP_THEME__) return; window.__SCALP_THEME__ = true;
   const $ = id => document.getElementById(id);
-  const RANK = ['tabA', 'tabP', 'tabJ', 'tabL', 'tabCommunity'];
+  const RANK = ['tabA', 'tabP', 'tabJ', 'tabL', 'tabN', 'tabCommunity'];
   function mark() {
     const v = $('viewA'); if (!v) return;
     [['lcAcc', 'th-lot'], ['hp', 'th-hp']].forEach(([id, cls]) => {
@@ -36,7 +36,7 @@
       if (!$('tabL')) bar.appendChild(make('tabL', 'Lots', 'lots'));
       bar.addEventListener('click', e => {
         const b = e.target.closest && e.target.closest('button'); if (!b) return;
-        if (['tabA', 'tabP', 'tabCommunity'].includes(b.id)) { mode(null); ['tabJ', 'tabL'].forEach(i => $(i) && $(i).classList.remove('on')); }
+        if (['tabA', 'tabP', 'tabN', 'tabCommunity'].includes(b.id)) { mode(null); ['tabJ', 'tabL'].forEach(i => $(i) && $(i).classList.remove('on')); }
       }, true);
       mark(); order();
       [600, 1800].forEach(t => setTimeout(() => { try { mark(); order(); } catch (_) {} }, t));

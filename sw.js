@@ -1,7 +1,7 @@
-/* Scalp Analyzer — service worker v32.
+/* Scalp Analyzer — service worker v33.
    Modules indépendants (communauté + thème) ; moteur d'analyse inchangé. */
-const C = 'scalp-v32';
-const F = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './plan.js', './lot.js', './journal.js', './journal-dashboard.html', './community.js', './theme.css', './theme.js'];
+const C = 'scalp-v33';
+const F = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './plan.js', './lot.js', './journal.js', './journal-dashboard.html', './community.js', './theme.css', './theme.js', './calendar.js'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(C).then(cache => Promise.allSettled(F.map(u => cache.add(new Request(u, { cache: 'reload' }))))));
@@ -30,6 +30,7 @@ self.addEventListener('fetch', event => {
         if (!out.includes('community.js')) out = out.replace(/<\/body\s*>/i, '<script src="./community.js?v=2"></script></body>');
         if (!out.includes('theme.css')) out = out.replace(/<\/head\s*>/i, '<link rel="stylesheet" href="./theme.css?v=1"></head>');
         if (!out.includes('theme.js')) out = out.replace(/<\/body\s*>/i, '<script src="./theme.js?v=1"></script></body>');
+        if (!out.includes('calendar.js')) out = out.replace(/<\/body\s*>/i, '<script src="./calendar.js?v=1"></script></body>');
         const headers = new Headers(response.headers);
         headers.delete('content-length'); headers.delete('content-encoding');
         headers.set('content-type', 'text/html; charset=utf-8');

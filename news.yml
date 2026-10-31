@@ -1,0 +1,38 @@
+name: Mise à jour du calendrier économique
+
+on:
+  schedule:
+    - cron: '7 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Télécharger et vérifier les annonces
+        run: |
+          curl -fsSL -A "Mozilla/5.0" --retry 3 --retry-delay 20 "https://nfs.faireconomy.media/ff_calendar_thisweek.json" -o raw.json || { echo "Téléchargement impossible : on garde l'ancien fichier"; exit 0; }
+          python3 - <<'PY'
+          import json, datetime, sys
+          try:
+              d = json.load(open('raw.json', encoding='utf-8'))
+          except Exception:
+              print("Réponse non valide (limite atteinte ?) : on garde l'ancien fichier"); sys.exit(0)
+          ev = [e for e in d if isinstance(e, dict) and e.get('title') and e.get('date') and e.get('impact')] if isinstance(d, list) else []
+          if len(ev) < 5:
+              print("Trop peu d'événements : on garde l'ancien fichier"); sys.exit(0)
+          out = {'updated': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'source': 'Forex Factory weekly export', 'events': ev}
+          json.dump(out, open('news.json', 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+          print(len(ev), 'événements enregistrés')
+          PY
+          rm -f raw.json
+      - name: Enregistrer dans le dépôt
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add news.json
+          git diff --cached --quiet || (git commit -m "Mise à jour du calendrier économique" && git push)
